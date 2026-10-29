@@ -51,7 +51,7 @@ Scope: Walloon municipalities covered by EMS EMSR518 (66). Germany and the Nethe
 | 4 | Shelter candidates: height, depth, flooded or not, status per scenario; EMS category per building | ✅ 2,346 | `facilities.gpkg` |
 | 5 | Roads (EMS) and railway lines (Infrabel): km flooded per scenario | ✅ | `roads.gpkg`, `roads_stats.parquet` |
 | 6 | Population and age, total and exposed (two-source range) | ✅ | `buildings.parquet`, `municipalities.gpkg` |
-| 7 | **Data-quality flags** from the review: no EFAS coverage east of 5.94°, depths > 10 m, 2.5 m height floor, depth inversions, depth unit in metres | ⏳ P0 | flags in `buildings.parquet`, `facilities.gpkg` |
+| 7 | **Data-quality flags:** municipalities with no EFAS-modelled river (28 of 66; replaces the review's "east of 5.94°", which was wrong), depths > 10 m (1,200), 2.5 m height floor (22.3%), depth inversions (84), depth unit metres (JRC README) | ✅ | flags in `buildings.parquet`, `municipalities.gpkg`, `facilities.gpkg` |
 | 8 | **Shelter attributes:** PRM access (OSM `wheelchair`), rough capacity (floor area × storeys ÷ 3.5 m² per person, the Sphere minimum, labelled as an assumption) | ⏳ P1 | `facilities.gpkg` |
 | 9 | **Dry access:** OSM road graph for walking and driving; per scenario, remove flooded edges and compute from each 250 m residential cell the nearest reachable dry shelter (distance, walking time) | ⏳ P1 | `access_<scenario>.parquet` |
 | 10 | **Vulnerability:** vulnerable sites (care homes, schools) in the extent; homes with no dry floor per cell (height ≤ depth + 1 m, aggregated, never per house) | ⏳ P1 | `cells.parquet` |
@@ -62,8 +62,8 @@ Scope: Walloon municipalities covered by EMS EMSR518 (66). Germany and the Nethe
 ## Apps
 **Administration view: Streamlit (existing `app/app.py`)**
 - ✅ Scenario and municipality pickers, map, Shelters, Population, Roads & rail, Compare, Buildings, Data & limits
-- ⏳ P0: review wording fixes (no "ground floor submerged", "in a modelled flood cell"), observed-2021 banner,
-  gate the "% missed" line, "no model coverage" instead of 0, aggregate the building dots to 250 m cells
+- ✅ P0: review wording fixes, 112/BE-Alert note, observed-2021 banner, "not modelled" banner, "% missed" gated
+  at n ≥ 30, buildings shown as 250 m cells only, height floor shown separately
 - ⏳ P1: shelter risk table per municipality (status, depth, access, PRM, capacity) with CSV export;
   vulnerable-groups panel; mark official reception sites (kept in the session, never uploaded)
 - ⏳ P2: multi-municipality triage table by province / rescue zone; utilities layer; one-page municipal sheet

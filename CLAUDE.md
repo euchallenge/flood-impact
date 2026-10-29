@@ -24,8 +24,10 @@ Repo: https://github.com/euchallenge/flood-impact (private). Plan and status: se
 - `app_data/` – precomputed outputs (committed so the app runs after cloning)
 - `data/external/` – external downloads (gitignored): GISCO LAU, OSM, Statbel, Eurostat census grid, OBAT docs
 
-Run order: `build_wallonia.py` → `build_facilities.py` → `build_population.py`, then
-`python -m streamlit run app/app.py`. After rebuilding data, clear the Streamlit cache (press C) or restart.
+Run order: `build_wallonia.py` → `build_facilities.py both` → `build_roads.py` → `build_population.py` →
+`build_quality.py`, then `python -m streamlit run app/app.py`. After rebuilding data, clear the Streamlit cache
+(press C) or restart. Write parquet files only through `common.save_parquet` (temp file + swap): a direct overwrite
+that fails on Windows can delete the file.
 
 ## Data
 - Challenge data: public bucket `datasets_challenge/working_data` (anonymous gcsfs, GDAL `/vsigs/`). EMS EMSR518 BE

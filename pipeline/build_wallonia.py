@@ -8,6 +8,7 @@ so the app itself never touches the bucket.
 """
 import os, json, time, warnings
 from pathlib import Path
+from common import save_parquet
 warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
@@ -114,7 +115,7 @@ hit = gpd.sjoin(b[["geometry"]], observed[["geometry"]], predicate="within", how
 b["flooded_2021"] = b.index.isin(hit)              # building centroid inside the observed extent
 b = b[["id", "LAU_ID", "use", "epoch", "height", "area", "shapefactor"] + [f"depth_rp{rp}" for rp in RPS]
       + ["flooded_2021", "geometry"]].reset_index(drop=True)
-b.to_parquet(OUT / "buildings.parquet")
+save_parquet(b, OUT / "buildings.parquet")
 log(f"step 3: {len(b):,} buildings in analysis areas saved")
 
 # ---------------- summary per municipality ----------------

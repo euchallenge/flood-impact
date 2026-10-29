@@ -8,6 +8,7 @@ Needs the outputs of build_wallonia.py in app_data/.
 """
 import os, sys, json, time, warnings
 from pathlib import Path
+from common import save_parquet
 warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
@@ -27,6 +28,7 @@ RPS = [10, 100, 500]
 FLOOR_M = 3.0                                      # assumed storey height
 NODE_BUFFER_M = 15                                 # OSM points get a small footprint
 NEAREST_M = 30                                     # max distance to borrow an OBAT height when none falls inside
+HEIGHT_FLOOR_M = 2.5                               # OBAT clamps heights to this minimum: not a measured height
 SOURCE = sys.argv[1] if len(sys.argv) > 1 else "both"   # ems | osm | both
 EMS_SHELTERS = {"1263": "School", "1264": "Hospital",    # EMS info codes; sports grounds may be outdoor pitches
                 "2411": "Stadium / sports hall", "2412": "Stadium / sports hall"}
@@ -146,8 +148,9 @@ for rp in RPS:                                     # wet = footprint touches the
     fac[f"wet_rp{rp}"] |= fac[f"depth_rp{rp}"] > 0
     spare = fac["height_m"] - fac[f"depth_rp{rp}"]
     fac[f"shelter_rp{rp}"] = np.select(
-        [~fac[f"wet_rp{rp}"], fac["height_m"].isna(), spare >= FLOOR_M],
-        ["Dry: usable", "Wet: height unknown", "Wet: upper floors usable"], "Wet: not usable")
+        [~fac[f"wet_rp{rp}"], spare >= FLOOR_M, fac["height_m"].isna() | (fac["height_m"] <= HEIGHT_FLOOR_M)],
+        ["Dry: usable", "Wet: upper floors usable", "Wet: height uncertain"], "Wet: not usable")
+fac["height_at_floor"] = fac["height_m"] <= HEIGHT_FLOOR_M
 fac["shelter_observed_2021"] = np.where(fac["flooded_2021"], "Flooded in 2021", "Dry in 2021")
 fac["height_m"] = fac["height_m"].round(1)
 fac.drop(columns="area_m2").to_file(OUT / "facilities.gpkg", driver="GPKG")
@@ -159,7 +162,7 @@ ems = pd.concat([gpd.read_file(G + p) for p in paths], ignore_index=True).to_crs
 ems["ems_category"] = ems["obj_type"].where(ems["info"].str.startswith("997"), ems["info"]).str.split("-", n=1).str[1]
 cat = gpd.sjoin(buildings[["geometry"]], ems[["ems_category", "geometry"]], predicate="within")
 buildings["ems_category"] = cat[~cat.index.duplicated()]["ems_category"].reindex(buildings.index).fillna("Not mapped by EMS")
-buildings.to_parquet(OUT / "buildings.parquet")
+save_parquet(buildings, OUT / "buildings.parquet")
 log(f"EMS categories: {buildings['ems_category'].value_counts().to_dict()}")
 
 pd.set_option("display.width", 250)

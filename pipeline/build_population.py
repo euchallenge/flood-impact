@@ -11,6 +11,7 @@ give a low-high range.
 """
 import os, time, warnings
 from pathlib import Path
+from common import save_parquet
 warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
@@ -92,7 +93,7 @@ ghs_b, ghs_area = allocate(ghs, ["pop"], "ghs")
 b = b.drop(columns=[c for c in b.columns if c.startswith("pop_")], errors="ignore")
 b = b.join(census_b).join(ghs_b)
 b[list(census_b.columns) + list(ghs_b.columns)] = b[list(census_b.columns) + list(ghs_b.columns)].fillna(0).astype("float32")
-b.to_parquet(OUT / "buildings.parquet")
+save_parquet(b, OUT / "buildings.parquet")
 
 exposed = {"observed_2021": b["flooded_2021"], **{s: b[f"depth_{s}"] > 0 for s in SCENARIOS[:3]}}
 stats = pd.concat([census_area, ghs_area], axis=1)

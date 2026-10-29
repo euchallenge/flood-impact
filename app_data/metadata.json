@@ -14,9 +14,13 @@
     ">3"
   ],
   "assumptions": [
-    "building flooded/exposed = OBAT centroid inside extent / EFAS cell with depth > 0",
-    "EFAS depth unit assumed metres (check Annex 2)",
-    "permanent water (EMS hydrography: rivers, lakes, reservoirs) removed from all flood extents",
-    "building depth is the EFAS value of its ~90 m cell, which can include the river channel for riverside buildings, so depths there may be overestimated"
-  ]
+    "A building is 'in a modelled flood cell' when its OBAT centroid lies in an EFAS cell (~90 m) with depth > 0, or inside the EMS observed extent for 2021. Depths are cell values, not depths at the building.",
+    "EFAS models larger rivers only: small streams and surface runoff are not covered. Where EFAS has no flood cell in a municipality, 0 means 'not modelled', not 'no risk'.",
+    "EFAS maps are treated as undefended hazard: the README does not mention flood defences, and the literature (Dottori et al. 2022, ESSD) describes local defences as not represented.",
+    "Depths above 10 m are flagged as likely river-channel cells or artefacts and left out of the deep-water counts.",
+    "OBAT heights are 100 m cell averages with a 2.5 m minimum; buildings at that minimum have an uncertain height.",
+    "Permanent water (EMS hydrography: rivers, lakes, reservoirs) is removed from all flood extents.",
+    "The EMS 2021 extent is satellite-detected only (radar on 15 and 17 July 2021) and is a lower bound; it captured almost none of the Vesdre valley flooding."
+  ],
+  "efas_depth_unit": "metres (JRC EFAS flood hazard README v3.1.1, field D10)"
 }

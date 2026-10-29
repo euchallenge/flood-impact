@@ -9,6 +9,7 @@ kept apart from municipalities.gpkg so this step can run alongside the populatio
 """
 import os, sys, time, warnings
 from pathlib import Path
+from common import save_parquet
 warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
@@ -101,7 +102,7 @@ for key in SCENARIOS:
     log(f"{key}: {wet['length_km'].sum():.1f} km flooded "
         f"({wet.groupby('mode')['length_km'].sum().round(1).to_dict()})")
 stats = stats.fillna(0).reset_index()
-stats.to_parquet(OUT / "roads_stats.parquet")
+save_parquet(stats, OUT / "roads_stats.parquet")
 
 pd.set_option("display.width", 250)
 summary = stats.merge(munis[["LAU_ID", "name"]]).groupby(["name", "mode"])[

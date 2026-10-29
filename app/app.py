@@ -3,7 +3,7 @@
 Reads only the precomputed files in app_data/ (built by pipeline/build_wallonia.py).
 Run from the project folder:  python -m streamlit run app/app.py
 """
-import os, json
+import io, os, json
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -11,6 +11,7 @@ import geopandas as gpd
 import folium
 import streamlit as st
 from dotenv import load_dotenv
+from shapely.geometry import box
 from streamlit_folium import st_folium
 
 BASE = Path(__file__).resolve().parents[1]
@@ -19,10 +20,14 @@ DATA = BASE / "app_data"
 SCENARIOS = {"Frequent flood (RP10)": "rp10", "Rare flood (RP100)": "rp100",
              "Extreme flood (RP500)": "rp500", "Observed July 2021": "observed_2021"}
 DEPTH_BINS = [0, 0.5, 1.5, 3, np.inf]              # same classes as the pipeline
-DEPTH_LABELS = {1: "< 0.5 m", 2: "0.5–1.5 m", 3: "1.5–3 m", 4: "> 3 m"}
+DEPTH_LABELS = {1: "≤ 0.5 m", 2: "0.5–1.5 m", 3: "1.5–3 m", 4: "> 3 m"}
 DEPTH_COLORS = {1: "#9ecae1", 2: "#4292c6", 3: "#2171b5", 4: "#08306b"}
 OBSERVED_COLOR = "#e6550d"
-MAX_POINTS = 3000                                  # keep the map responsive
+CELL_M = 250                                       # optional layer: buildings aggregated per 250 m cell
+MAX_POINTS = 5000                                  # building dots on the map (a random sample above this)
+USE_COLORS = {"Residential": "#e41a1c", "Non-residential": "#377eb8", "Outside built-up area": "#999999"}
+SUSPECT_DEPTH_M = 10                               # deeper cells are likely river channel or artefacts (step 7)
+HEIGHT_FLOOR_M = 2.5                               # OBAT minimum height: not a measured value
 CARTO_KEY = os.getenv("CARTO_API_KEY", "")         # CARTO basemaps need ?key= (otherwise "API key required" tiles)
 CARTO_ATTR = "© OpenStreetMap contributors © CARTO"
 BASEMAPS = {                                       # name: (tile URL, attribution); first one is shown by default
@@ -38,7 +43,7 @@ USE_LABELS = {0: "Outside built-up area", 1: "Residential", 2: "Non-residential"
 EPOCH_LABELS = {0: "Outside built-up area", 1: "Before 1980", 2: "1980–1990", 3: "1990–2000", 4: "2000–2010",
                 5: "2010–2020"}
 SHELTER_COLORS = {"Dry: usable": "#1a9850", "Wet: upper floors usable": "#fdae61", "Wet: not usable": "#d73027",
-                  "Wet: height unknown": "#969696", "Dry in 2021": "#1a9850", "Flooded in 2021": "#d73027"}
+                  "Wet: height uncertain": "#969696", "Dry in 2021": "#1a9850", "Flooded in 2021": "#d73027"}
 TRANSPORT_STYLE = {"Road": {"color": "#7b3294", "weight": 4}, "Railway": {"color": "#000000", "weight": 4,
                                                                          "dashArray": "8 4"}}
 CATEGORY_ICONS = {"School": "🏫", "Hospital": "🏥", "Church": "⛪", "Stadium / sports hall": "🏟️"}
@@ -52,7 +57,8 @@ st.set_page_config(page_title="Flood impact card", page_icon="🌊", layout="wid
 def load():
     munis = gpd.read_file(DATA / "municipalities.gpkg")
     extents = {k: gpd.read_file(DATA / "flood_extents.gpkg", layer=k) for k in SCENARIOS.values()}
-    buildings = gpd.read_parquet(DATA / "buildings.parquet")
+    # read into memory so the running app never keeps the file open (Windows would block pipeline rewrites)
+    buildings = gpd.read_parquet(io.BytesIO((DATA / "buildings.parquet").read_bytes()))
     meta = json.loads((DATA / "metadata.json").read_text(encoding="utf-8"))
     facilities = gpd.read_file(DATA / "facilities.gpkg") if (DATA / "facilities.gpkg").exists() else None
     roads = None
@@ -60,6 +66,25 @@ def load():
         roads = {"stats": pd.read_parquet(DATA / "roads_stats.parquet"),
                  **{k: gpd.read_file(DATA / "roads.gpkg", layer=f"flooded_{k}") for k in SCENARIOS.values()}}
     return munis, extents, buildings, meta, facilities, roads
+
+
+@st.cache_data
+def building_cells(lau_id, key):
+    """Buildings in a flood cell aggregated to CELL_M squares: count and most common depth class."""
+    b = buildings[buildings["LAU_ID"] == lau_id]
+    b = b[b["flooded_2021"]] if key == "observed_2021" else b[b[f"depth_{key}"] > 0]
+    if b.empty:
+        return gpd.GeoDataFrame(columns=["depth_class", "tooltip", "geometry"], geometry="geometry", crs=4326)
+    p = b.geometry.to_crs(3035)
+    df = pd.DataFrame({"cx": (p.x // CELL_M).astype(int), "cy": (p.y // CELL_M).astype(int)})
+    df["depth_class"] = 0 if key == "observed_2021" else pd.cut(
+        b[f"depth_{key}"].clip(upper=SUSPECT_DEPTH_M), DEPTH_BINS, labels=list(DEPTH_LABELS)).astype(int).values
+    g = df.groupby(["cx", "cy"]).agg(n=("depth_class", "size"),
+                                     depth_class=("depth_class", lambda s: s.mode().iloc[0])).reset_index()
+    g["tooltip"] = g["n"].astype(str) + " buildings" + ("" if key == "observed_2021" else
+                                                       " · mostly " + g["depth_class"].map(DEPTH_LABELS))
+    geom = [box(x * CELL_M, y * CELL_M, (x + 1) * CELL_M, (y + 1) * CELL_M) for x, y in zip(g["cx"], g["cy"])]
+    return gpd.GeoDataFrame(g[["depth_class", "tooltip"]], geometry=geom, crs=3035).to_crs(4326)
 
 
 if not (DATA / "metadata.json").exists():
@@ -100,19 +125,32 @@ exp = b[b["exposed"]]
 
 # ---------------- header & tiles ----------------
 st.title(f"{name} · {label}")
+st.caption("⚠️ Planning support, not official evacuation guidance. In an emergency call 112 and follow BE-Alert and "
+           "your municipality.")
 if muni["coverage"] < 0.99:
     st.info(f"Copernicus EMS mapped {muni['coverage']:.0%} of {name}. All figures refer to that part only.")
+if observed:
+    st.warning("Satellite-detected flooding only (radar, 15 and 17 July 2021). This is a lower bound: most of the "
+               "Vesdre valley flooding was not captured.")
+elif muni["rp500_km2"] == 0:
+    st.warning(f"EFAS models no river in the mapped part of {name}. 0 means 'not modelled', not 'no flood risk': "
+               "small streams and surface runoff are not covered.")
 
 flooded_km2 = muni[f"{key}_km2"]
 c = st.columns(4)
 c[0].metric("Flooded area", f"{flooded_km2:.2f} km²")
-c[1].metric("Buildings exposed", f"{len(exp):,}", f"{len(exp) / max(len(b), 1):.1%} of buildings", delta_color="off")
+c[1].metric("Buildings in a modelled flood cell" if not observed else "Buildings in the observed extent",
+            f"{len(exp):,}", f"{len(exp) / max(len(b), 1):.1%} of buildings", delta_color="off")
 if observed:
     c[2].metric("Satellite passes", "15 & 17 July 2021")
 else:
-    deep = (exp[f"depth_{key}"] > 1.5).sum()
-    c[2].metric("Exposed with water > 1.5 m", f"{deep:,}", "ground floor submerged", delta_color="off")
-c[3].metric("Exposed with unknown height", f"{exp['height'].isna().mean():.0%}" if len(exp) else "–")
+    depth = exp[f"depth_{key}"]
+    deep = ((depth > 1.5) & (depth <= SUSPECT_DEPTH_M)).sum()
+    c[2].metric("Modelled cell depth > 1.5 m", f"{deep:,}",
+                f"{(depth > SUSPECT_DEPTH_M).sum():,} more with > {SUSPECT_DEPTH_M} m (likely artefact)", delta_color="off")
+uncertain = exp["height"].isna() | (exp["height"] <= HEIGHT_FLOOR_M)
+c[3].metric("Height uncertain", f"{uncertain.mean():.0%}" if len(exp) else "–",
+            f"at the {HEIGHT_FLOOR_M} m model floor or missing", delta_color="off")
 
 fac = facilities[facilities["LAU_ID"] == muni["LAU_ID"]] if facilities is not None else None
 status_col = f"shelter_{key}"
@@ -162,16 +200,24 @@ with tab_map:
         folium.GeoJson(obs, name="Observed July 2021 (outline)", show=False,
                        style_function=lambda f: {"color": OBSERVED_COLOR, "weight": 1.5, "fillOpacity": 0}).add_to(m)
 
-    pts = exp.sample(min(len(exp), MAX_POINTS), random_state=0)
-    layer = folium.FeatureGroup(name="Exposed buildings")
-    for row in pts.itertuples():
-        color = OBSERVED_COLOR if observed else DEPTH_COLORS[int(row.depth_class)]
-        tip = f"height {row.height:.1f} m" if pd.notna(row.height) else "height unknown"
-        if not observed:
-            tip += f" · water {getattr(row, f'depth_{key}'):.1f} m"
-        folium.CircleMarker([row.geometry.y, row.geometry.x], radius=2, color=color, fill=True,
-                            fill_opacity=0.9, weight=0, tooltip=tip).add_to(layer)
-    layer.add_to(m)
+    if not exp.empty:                              # admin view only: the resident view never shows individual homes
+        pts = exp.sample(min(len(exp), MAX_POINTS), random_state=0)
+        depth_txt = "" if observed else " · modelled cell depth " + pts[f"depth_{key}"].round(1).astype(str) + " m"
+        dots = gpd.GeoDataFrame({"kind": pts["use"].map(USE_LABELS),
+                                 "tip": pts["use"].map(USE_LABELS) + " · height "
+                                        + (pts["height"].round(1).astype(str) + " m").where(pts["height"].notna(), "unknown")
+                                        + depth_txt}, geometry=pts.geometry.values, crs=pts.crs)
+        folium.GeoJson(dots, name="Flooded buildings (by use)",
+                       marker=folium.CircleMarker(radius=3, weight=0.5, fill=True, fill_opacity=0.9),
+                       style_function=lambda f: {"color": "#333", "fillColor": USE_COLORS[f["properties"]["kind"]]},
+                       tooltip=folium.GeoJsonTooltip(["tip"], labels=False)).add_to(m)
+    cells = building_cells(muni["LAU_ID"], key)
+    if not cells.empty:
+        folium.GeoJson(cells, name=f"Buildings in flood cells (per {CELL_M} m)", show=False,
+                       style_function=lambda f: {"weight": 0.5, "color": "#555", "fillOpacity": 0.75,
+                                                 "fillColor": OBSERVED_COLOR if observed
+                                                 else DEPTH_COLORS[f["properties"]["depth_class"]]},
+                       tooltip=folium.GeoJsonTooltip(["tooltip"], labels=False)).add_to(m)
     if wet_lines is not None and not wet_lines.empty:
         folium.GeoJson(wet_lines[["mode", "class", "name", "length_km", "geometry"]], name="Flooded roads & railways",
                        style_function=lambda f: TRANSPORT_STYLE[f["properties"]["mode"]],
@@ -190,10 +236,12 @@ with tab_map:
     folium.LayerControl(collapsed=False).add_to(m)
     st_folium(m, height=560, use_container_width=True, returned_objects=[])
 
-    legend = ("🟧 observed flood extent" if observed else
+    legend = ("🟧 observed flood extent" if observed else "Modelled cell depth: " +
               " · ".join(f"<span style='color:{DEPTH_COLORS[k]}'>■</span> {v}" for k, v in DEPTH_LABELS.items()))
-    st.caption(legend + (f" · map shows {MAX_POINTS:,} of {len(exp):,} exposed buildings" if len(exp) > MAX_POINTS else ""),
-               unsafe_allow_html=True)
+    dots_legend = " · ".join(f"<span style='color:{c}'>●</span> {k}" for k, c in USE_COLORS.items())
+    st.caption(legend + " (flood extent)  \nFlooded buildings: " + dots_legend +
+               (f" · showing {MAX_POINTS:,} of {len(exp):,}" if len(exp) > MAX_POINTS else "") +
+               f" · optional layer: {CELL_M} m squares by most common depth class", unsafe_allow_html=True)
 
 with tab_shel:
     if fac is None or fac.empty:
@@ -202,7 +250,7 @@ with tab_shel:
         st.subheader(f"Shelter candidates in {name}: {label}")
         st.markdown(" · ".join(f"<span style='color:{c}'>■</span> {s}" for s, c in SHELTER_COLORS.items()
                                if s in set(fac[status_col])), unsafe_allow_html=True)
-        st.bar_chart(pd.crosstab(fac["category"], fac[status_col]),
+        st.bar_chart(pd.crosstab(fac["category"], fac[status_col]).rename(columns=lambda s: s.replace(":", " –")),  # ":" breaks Altair
                      color=[SHELTER_COLORS[s] for s in sorted(set(fac[status_col]))], horizontal=True)
         table = pd.DataFrame({
             "Facility": fac["category"].map(CATEGORY_ICONS) + " " + fac["name"].replace("", "(no name)"),
@@ -282,10 +330,14 @@ with tab_cmp:
     rows.append({"Scenario": "Observed July 2021", "Flooded area (km²)": round(muni["observed_2021_km2"], 2),
                  "Buildings exposed": int(flooded.sum())})
     st.dataframe(pd.DataFrame(rows).set_index("Scenario"), width="stretch")
-    if flooded.sum():
+    if flooded.sum() >= 30:                        # below that a percentage is noise
         missed = {r["Scenario"]: r["Flooded in 2021 but NOT predicted"] / flooded.sum() for r in rows[:3]}
-        st.markdown("**Share of buildings flooded in 2021 that each scenario missed:** " +
+        st.markdown("**Share of buildings flooded in 2021 outside each modelled scenario:** " +
                     " · ".join(f"{k.split('(')[1][:-1]}: {v:.0%}" for k, v in missed.items()))
+    elif flooded.sum():
+        st.markdown(f"Only {int(flooded.sum())} buildings lie in the 2021 observed extent here: too few for a percentage.")
+    st.markdown("This is **agreement between two different products**, not a validation of the model: the observed "
+                "layer is a lower bound and the modelled layers ignore flood defences.")
     st.caption("A modelled return period is not a forecast of the 2021 event: EFAS maps river floods, while 2021 also "
                "involved flash floods on small streams. EMS extents are snapshots at satellite pass time and can miss "
                "water that had already receded or was under trees and buildings.")
@@ -296,10 +348,12 @@ with tab_bld:
     else:
         left, right = st.columns(2)
         if not observed:
-            left.markdown("**Exposed buildings by water depth**")
+            left.markdown(f"**Buildings by modelled cell depth** (incl. {(exp[f'depth_{key}'] > SUSPECT_DEPTH_M).sum():,}"
+                          f" with > {SUSPECT_DEPTH_M} m, likely artefacts, in '> 3 m')")
             left.bar_chart(exp["depth_class"].map(DEPTH_LABELS).value_counts().reindex(DEPTH_LABELS.values()).fillna(0))
-        right.markdown("**Exposed buildings by height**")
-        h = pd.cut(exp["height"], [0, 3, 6, 9, 15, np.inf], labels=["≤ 3 m", "3–6 m", "6–9 m", "9–15 m", "> 15 m"])
+        right.markdown("**Exposed buildings by height** (OBAT, 100 m averages)")
+        h = pd.cut(exp["height"], [0, HEIGHT_FLOOR_M, 3, 6, 9, 15, np.inf],
+                   labels=[f"{HEIGHT_FLOOR_M} m (model floor)", "2.5–3 m", "3–6 m", "6–9 m", "9–15 m", "> 15 m"])
         right.bar_chart(h.value_counts().sort_index())
         left2, right2 = st.columns(2)
         left2.markdown("**Exposed buildings by use** (OBAT)")
