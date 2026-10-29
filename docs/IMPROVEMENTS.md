@@ -114,7 +114,118 @@ Key facts (verified):
 building-level risk for private homes (privacy, insurance).
 
 ## 6. Policy-maker perspective (mayors, governor, Walloon Government)
-*Pending: a separate workflow is drafting and verifying this section per government level.*
+Drafted per government level (municipal, provincial/federal, regional/EU), each draft adversarially checked against official sources and `app_data`, then merged.
+
+**Scope.** All figures cover only the part of the 66 communes that Copernicus EMS mapped (EMSR518 AOI01/02). That area spans three provinces: Liège (47 of its 84 communes), Luxembourg (13 of 44) and Namur (6 of 38). In 21 of the 66 communes, less than 50% of the area is mapped. Baelen, Stavelot, Malmedy, Huy, Dinant and Namur are not in the data.
+
+### 6.1 Who decides what
+
+| Actor | Level | Competence (floods/shelter) | Source |
+|---|---|---|---|
+| Mayor (bourgmestre) | Commune | Draws up the emergency plan (PGUI) and triggers the communal phase. Can order compulsory evacuation and assign a temporary place to stay (art. 182). Can requisition buildings and buses (art. 181). Can send BE-Alert messages. | [L07] art. 9 §4, 181, 182; [ULg] |
+| Emergency planning officer (PLANU) + safety cell (D1–D5) | Commune | Prepares the PGUI and the flood plan (PPUI), including reception sites. That these sites are confidential is (to verify). | [ULg]; federal circular of 14 May 2024 |
+| Municipal council | Commune | Approves the PGUI before the governor does. Confirms the mayor's emergency orders (art. 134 of the communal law). | [L07] art. 9 §4; UVCW art-1627 |
+| Municipal executive (collège communal) | Commune | Building permits: can refuse or attach conditions in a flood-hazard zone (CoDT D.IV.57 3°). Manages 3rd-category streams. **Exception:** Eupen, Kelmis, Lontzen and Raeren fall under the German-speaking Community. | [CIRC]; [DG] |
+| Social welfare centre (CPAS) | Commune | Rehousing. A reference address can be given with the commune's agreement. | [RR] |
+| Governors of Liège, Luxembourg and Namur | Province (acting for the federal state) | Trigger and lead the provincial phase. Can send BE-Alert messages. Support communes with their PGUI (RD 2019 art. 29). Start emergency plans for dams (inquiry recommendation 106). | [INQ]; [LUX]; [BEA] |
+| Interior Minister, supported by the National Crisis Centre (NCCN) | Federal | Federal phase. The NCCN runs BE-Alert. | [BEA]; PRGC 2025 |
+| Rescue zones: IILE-SRI, VHP, HEMECO, Zone Luxembourg, DINAPHI, ZS5 WAL, Zone DG | Zone | Fire and rescue operations (D1). Inter-zone command is a federal procedure (recommendation 81). | [KCCE] |
+| Walloon Government: Desquesnes (spatial planning, public works), Neven (housing) | Region | Flood-hazard map (AGW 4/3/2021). Flood risk plans 2022–27 (AGW 19/1/2023). €25M for buying and demolishing exposed property in 9 communes. Calamity fund. | [ALEA]; [W5] |
+| CORTEX (SPW) | Region | Regional crisis centre and interface with governors and communes (decree of 13/7/2023). | [CTX] |
+| SPW MI (Eupen and Gileppe dams) | Region | Dam releases (to verify). | [INQ] rec. 106 |
+| Red Cross | Partner | Reception support. Formal role (to verify). | — |
+
+Caveat: a 2024 federal draft law would repeal RD 22/05/2019. Check on ejustice whether it is in force.
+
+### 6.2 Top decisions
+
+**Before**
+- Mayor and PLANU: where to draw the flood-plan perimeter. Are the reception sites, the crisis room and the fire posts inside the flood extent? (Recommendation 75: update the PGUI every 6 years with a shelter and evacuation plan.)
+- Mayor: is the commune subscribed to BE-Alert, with messages drafted in advance? Several Vesdre communes were not subscribed in 2021 [ULg]. Which buildings and buses would be requisitioned, and where would evacuees stay?
+- Governors: which communes to support first. Who coordinates across zones and provinces? The Vesdre runs through Zone DG, then VHP, then IILE-SRI. The Ourthe runs through Zone Luxembourg, then HEMECO, then IILE-SRI.
+- Region: update the hazard map with 2021 evidence. The EU Floods Directive review was due 22 Dec 2025, and no revised map was found as of Oct 2026. Third flood risk plan due 22 Dec 2027.
+
+**During**
+- When to trigger the communal, provincial or federal phase.
+- Whom to evacuate, and whether to send people out of the valley or upstairs.
+- Which reception site to open, and which zone to target with BE-Alert.
+- When dams release water, and when to ask for EU assets.
+
+**After**
+- Which buildings to inspect for stability, and which to declare uninhabitable (Walloon housing code art. 7 §3, to verify).
+- How many households the CPAS must rehouse.
+- Whether to rebuild with conditions or buy and demolish (the €25M envelope).
+
+### 6.3 Tool features, ranked
+
+**[R]** = reuses the resident/shelter view.
+
+| # | Feature | Serves | Data | Effort | Priority |
+|---|---|---|---|---|---|
+| 1 | Coverage banner ("mapped part only"; the 2021 observed layer is a lower bound) | All | Current | <1h | High |
+| 2 | Multi-commune triage table, filterable by province, arrondissement and rescue zone, with CSV export | Governors, CORTEX, ministers | Current + KCCE zone table | <1h | High |
+| 3 | Plain labels: frequent / rare / extreme (RP10/100/500), showing that the extents are nested | Mayor, PLANU | Current | <1h | High |
+| 4 | Residents in the flood extent per commune, and shelter gap **[R]** | PLANU, CPAS, governor | Needs GHS-POP | Half-day | High |
+| 5 | Reception-site check: inside / within X m / outside the mapped area. Sites stay local and are not stored. **[R]** | PLANU, governor | Current + sites from the user or OSM | Half-day | High |
+| 6 | Overlay of the Walloon hazard map and the SPW July 2021 flooded-zones map | Municipal executive, SPW | External WMS (to verify) | Half-day | High |
+| 7 | "Layers disagree" panel (Vesdre, Theux, observed buildings outside all scenarios) | Region, governors | Current | <1h | Medium |
+| 8 | Export of a draft perimeter (GeoJSON) and a one-page municipal card | PLANU, council | Current | <1h | Medium |
+| 9 | Care homes, schools and campsites inside the extent **[R]** | PLANU, governor | External (OSM/AViQ) | Half-day | Medium |
+| 10 | Depth guard: classes per municipality only, flag depths >10 m | All | Current | <1h | Medium |
+| 11 | 2000–2020 construction inside the extent, as a pre-2021 baseline at grid-cell level | Municipal executive, SPW | Current (epoch) | <1h | Low |
+| 12 | Roads, access, social vulnerability | — | External + DEM | Not feasible in the hackathon | Low |
+| 13 | Forecasts, dam scenarios, € damage | — | — | — | Do not build |
+
+### 6.4 Key numbers
+
+All recomputed from `app_data/`. Method: count of buildings with depth_rp* > 0 in buildings.parquet, joined to municipalities.gpkg on LAU_ID.
+
+- **64,366 of 473,524 buildings (13.6%)** are in the RP100 extent. By province (first digit of LAU_ID): Liège 56,265, Luxembourg 6,486, Namur 1,615.
+- The extents are nested: **55,685 (86.5%)** are already in RP10, and RP500 adds only **3,219** (total 67,585).
+- Concentration: Liège city has **26,837 (41.7%)**. 12 communes hold 80% of exposed buildings. Only 37 of the 66 communes have any.
+- Vesdre five (Verviers, Pepinster, Limbourg, Chaudfontaine, Trooz): **5,521** in RP100, with **0** observed in 2021. Adding Theux (1,601) gives **7,122**.
+- EMS 2021 observed layer: **203** buildings in 17 communes. **47** of them are outside every modelled scenario.
+- Liège: **23,408** buildings in RP10, but **0** observed flooded in 2021. The modelled extent is likely an upper bound there (whether flood defences are modelled is unverified).
+- **21 of 66** communes are less than 50% mapped (Eupen 6%, Jalhay 33%). Limbourg is 57% mapped.
+- Upper Ourthe (Durbuy, Hotton, La Roche, Rendeux): **5,740** in RP100.
+- **853** buildings have an RP100 depth above 10 m, likely model artefacts.
+
+### 6.5 Recommendation options
+
+1. **Mayors of Verviers, Pepinster, Limbourg, Trooz, Chaudfontaine and Theux:** have PLANU check every reception site and crisis post against RP100/RP500 and the SPW 2021 map, not against the satellite layer (0 observed vs 7,122 modelled).
+2. **Governor of the Province of Liège, with the Governor of Luxembourg for the Ourthe:** bring the Vesdre and Ourthe mayors together to build one shared inventory of dry reception capacity outside the valley floors, sized with GHS-POP (inquiry recommendations 30 and 75).
+3. **Minister Desquesnes / SPW, with CORTEX:** start the overdue hazard-map review where the EU layers and the 2021 evidence disagree.
+4. **CPAS presidents of the Vesdre communes:** agree rehousing procedures in advance (reference address, modular housing), sized on residents inside the RP100 extent.
+
+**Pick: option 2.** It names one actor who can bring several communes together, and the governor already leads cross-commune crises. Exposure crosses commune borders, so one commune's valley-floor shelters may be unusable in the same event. It links directly to the resident/shelter view (features 4 and 5), and GHS-POP can be added during the hackathon. Use "bring together" or "ask", not "require": the governor's power to impose this is unverified.
+
+### 6.6 What NOT to show or claim
+
+- Do not present the 203 observed buildings as the 2021 damage. The 0 in the Vesdre is a limit of the EMS product (Vesdre mapped only from 17 July images, plus radar non-detection), not an absence of flooding.
+- Do not say "X buildings flood every 10 years" or "a third of Liège floods".
+- No depth for individual buildings, no "ground floor submerged", and no reading of OBAT height as a number of floors.
+- Do not estimate people as POP_2021 × exposed share. POP_2021 counts the whole commune.
+- Do not present the EFAS extent as the legal flood zone. The Walloon hazard map is the legal reference for permits and insurance.
+- Do not present totals as commune or province totals. They cover the mapped part only.
+- Do not link EFAS RP500 to the 2021 "yellow zone" evacuation decision. Those zones came from the Walloon hazard map, and the witness accounts are contested.
+- Do not treat epoch 4–5 as proof that land-use rules worked.
+- No PGUI reception sites, no addresses, no ranking or blaming of mayors.
+- No forecasts, alert triggers or € damage figures.
+- Unverified, do not cite: art. 129 of the 2014 insurance law and the 18-month exclusion, the "two mayors can trigger the provincial phase" rule (that was the 2006 regime), Verified elsewhere and OK to cite with care: "161 recommendations (187 with sub-recommendations)" (Walloon Government, 17/04/2025) and "33% of Walloon respondents never warned" (EGU25-15747, Belgian survey n=550).
+
+**Sources:**
+- [L07] https://kcce.eu/sites/default/files/2007-05-15l_loi_securite_civile_-_04-2024.pdf
+- [ULg] https://www.wallonie.be/sites/default/files/2021-10/annexe_b_-_organisation_de_la_gestion_de_crise_-_uliege.pdf
+- [CIRC] https://territoire.wallonie.be/storage/territoire/documents/content/page/inondations/circulaireinondations-231221.pdf
+- [INQ] https://www.wallonie.be/sites/default/files/2022-11/Inondations%20rapport%20de%20la%20commission%20parlementaire.pdf
+- [W5] https://wallonie.be/fr/actualites/5-ans-apres-les-inondations-de-2021-ou-en-est
+- [ALEA] https://wallonie.be/fr/demarches/sinformer-sur-la-carte-de-lalea-dinondation-en-wallonie
+- [BEA] https://www.be-alert.be/en/how-does-be-alert-work/which-emergency-situations-will-i-receive-message
+- [KCCE] https://kcce.eu/sites/default/files/2009-02-02r_zones_de_secours_-_07-2024.pdf
+- [RR] https://www.rijksregister.fgov.be/sites/default/files/documents/fr/population/circulaires/Circulaire_27072021.pdf
+- [DG] https://uvcw.be/amenagement-territoire/actus/art-2496
+- [CTX] https://spw.wallonie.be/sites/default/files/2024-07/Communique%20Presse_CORTEX_FR.%2818.04.2024%29pdf.pdf
+- [LUX] https://gouverneur-luxembourg.be/wp-content/uploads/2022/04/20220425_Plaquette-bourgmestres_avec-couverture.pdf
 
 ## 7. Responsible AI and AI sheet
 - **Pre-event prep.** Check Annex 3 on whether it is allowed. `export-upload/template/TEMPLATE-NOTE.md` already discloses it
