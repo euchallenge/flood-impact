@@ -1,0 +1,12 @@
+gcsfs
+geopandas
+pyogrio
+rasterio
+shapely
+numpy
+pandas
+pyarrow
+streamlit
+folium
+streamlit-folium
+python-dotenv

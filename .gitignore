@@ -1,0 +1,7 @@
+.env
+data/
+__pycache__/
+.ipynb_checkpoints/
+.idea/
+Annexes/
+how_to_get_started.ipynb

@@ -1,0 +1,21 @@
+{
+  "region": "Wallonia, municipalities intersecting EMSR518 AOI01/AOI02 (MONIT01 products)",
+  "observed_2021_sources": "Sentinel-1 15/07/2021 and 17/07/2021, COSMO-SkyMed 17/07/2021 (AOI01)",
+  "municipality_boundaries": "Eurostat GISCO LAU 2021 (external), clipped to EMS areas of interest",
+  "efas": {
+    "rp10": "datasets_challenge/working_data/cems-efas/Europe_RP10_filled_depth.tif",
+    "rp100": "datasets_challenge/working_data/cems-efas/Europe_RP100_filled_depth.tif",
+    "rp500": "datasets_challenge/working_data/cems-efas/Europe_RP500_filled_depth.tif"
+  },
+  "depth_classes_m": [
+    "0-0.5",
+    "0.5-1.5",
+    "1.5-3",
+    ">3"
+  ],
+  "assumptions": [
+    "building flooded/exposed = OBAT centroid inside extent / EFAS cell with depth > 0",
+    "EFAS depth unit assumed metres (check Annex 2)",
+    "permanent water bodies not yet removed from EFAS extents"
+  ]
+}
