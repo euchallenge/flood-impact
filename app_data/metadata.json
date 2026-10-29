@@ -16,6 +16,7 @@
   "assumptions": [
     "building flooded/exposed = OBAT centroid inside extent / EFAS cell with depth > 0",
     "EFAS depth unit assumed metres (check Annex 2)",
-    "permanent water bodies not yet removed from EFAS extents"
+    "permanent water (EMS hydrography: rivers, lakes, reservoirs) removed from all flood extents",
+    "building depth is the EFAS value of its ~90 m cell, which can include the river channel for riverside buildings, so depths there may be overestimated"
   ]
 }

@@ -1,4 +1,4 @@
-    """Steps 1-3 of the impact-card pipeline: Walloon municipalities covered by EMSR518.
+"""Steps 1-3 of the impact-card pipeline: Walloon municipalities covered by EMSR518.
 
 Reads only the needed windows from the bucket and writes everything the app needs to app_data/,
 so the app itself never touches the bucket.
@@ -26,6 +26,7 @@ LAU_FILE = BASE / "data/external/lau/LAU_RG_01M_2021_4326.parquet"
 EQUAL_AREA = 3035                                  # LAEA Europe, for areas in km2
 RPS = [10, 100, 500]
 DEPTH_BINS = [0, 0.5, 1.5, 3, np.inf]              # map classes in metres (EFAS unit to confirm in Annex 2)
+WATER_TYPES = ("BH080", "BH130", "BH140")          # EMS lakes, reservoirs, rivers; BH090 "land subject to inundation" is kept
 WALLOON_NIS = ("25", "5", "6", "8", "9")           # NIS prefixes: Brabant wallon, Hainaut, Liège, Luxembourg, Namur
 FR_NAMES = {"Luik": "Liège", "Wezet": "Visé", "Bitsingen": "Bassenge",   # GISCO uses Dutch names for these
             "Limburg": "Limbourg", "Saint-Nicolas (Luik)": "Saint-Nicolas"}
@@ -48,9 +49,10 @@ def km2(gdf):
     return gdf.to_crs(EQUAL_AREA).area / 1e6
 
 
-def per_municipality(extent, munis):
-    # clip an extent layer to the analysis areas and dissolve it to one (multi)polygon per municipality
+def per_municipality(extent, munis, water):
+    # clip an extent layer to the analysis areas, remove permanent water, dissolve to one (multi)polygon per municipality
     parts = gpd.overlay(extent, munis[["LAU_ID", "geometry"]], how="intersection", keep_geom_type=True)
+    parts = gpd.overlay(parts, water, how="difference", keep_geom_type=True)
     return parts.dissolve(by=[c for c in parts.columns if c in ("LAU_ID", "depth_class")]).reset_index()
 
 
@@ -69,7 +71,14 @@ munis = munis.sort_values("name").reset_index(drop=True)
 log(f"step 1: {len(munis)} Walloon municipalities intersect the EMS areas")
 
 # ---------------- 2. flood extents ----------------
-observed = per_municipality(ems_layer("observedEventA")[["geometry"]], munis)
+water = ems_layer("hydrographyA")
+water = water[water["obj_type"].str[:5].isin(WATER_TYPES)][["geometry"]]
+water_by_muni = gpd.overlay(water, munis[["LAU_ID", "geometry"]], how="intersection").dissolve(by="LAU_ID")
+munis["permanent_water_km2"] = munis["LAU_ID"].map(km2(water_by_muni)).fillna(0)
+log(f"step 2: {len(water):,} permanent water polygons ({munis['permanent_water_km2'].sum():.1f} km2 in analysis areas)")
+
+(OUT / "flood_extents.gpkg").unlink(missing_ok=True)
+observed = per_municipality(ems_layer("observedEventA")[["geometry"]], munis, water)
 observed.to_file(OUT / "flood_extents.gpkg", layer="observed_2021", driver="GPKG")
 log(f"step 2: observed 2021 extent clipped ({len(observed)} municipalities flooded)")
 
@@ -87,7 +96,7 @@ for rp in RPS:
     classes[depth[rp] == 0] = 0
     polys = [{"depth_class": int(v), "geometry": shape(g)}
              for g, v in shapes(classes, mask=classes > 0, transform=transform)]
-    ext = per_municipality(gpd.GeoDataFrame(polys, crs=4326), munis)
+    ext = per_municipality(gpd.GeoDataFrame(polys, crs=4326), munis, water)
     ext.to_file(OUT / "flood_extents.gpkg", layer=f"rp{rp}", driver="GPKG")
     log(f"step 2: EFAS RP{rp} polygonised ({(depth[rp] > 0).mean():.1%} of window cells wet)")
 
@@ -129,10 +138,12 @@ munis.to_file(OUT / "municipalities.gpkg", driver="GPKG")
     "depth_classes_m": ["0-0.5", "0.5-1.5", "1.5-3", ">3"],
     "assumptions": ["building flooded/exposed = OBAT centroid inside extent / EFAS cell with depth > 0",
                     "EFAS depth unit assumed metres (check Annex 2)",
-                    "permanent water bodies not yet removed from EFAS extents"],
+                    "permanent water (EMS hydrography: rivers, lakes, reservoirs) removed from all flood extents",
+                    "building depth is the EFAS value of its ~90 m cell, which can include the river channel "
+                    "for riverside buildings, so depths there may be overestimated"],
 }, indent=2, ensure_ascii=False), encoding="utf-8")
 
-cols = ["name", "coverage", "observed_2021_km2", "rp100_km2", "buildings", "buildings_flooded_2021",
+cols = ["name", "coverage", "permanent_water_km2", "observed_2021_km2", "rp100_km2", "buildings", "buildings_flooded_2021",
         "buildings_rp10", "buildings_rp100", "buildings_rp500", "height_missing_share"]
 pd.set_option("display.width", 250)
 print(munis[cols].round(2).sort_values("buildings_flooded_2021", ascending=False).to_string(index=False))

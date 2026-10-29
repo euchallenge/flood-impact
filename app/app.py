@@ -67,8 +67,12 @@ order = munis.assign(share=share).sort_values(["share", "name"], ascending=[Fals
 labels = {r.LAU_ID: f"{r.name} · {r.share:.1%} of buildings exposed ({int(getattr(r, EXPOSED_COL[key])):,})"
                     + (f" · ⚠ {r.coverage:.0%} mapped" if r.coverage < 0.5 else "")
           for r in order.itertuples()}
-lau_id = st.sidebar.selectbox("Municipality (sorted by exposure in this scenario)", list(labels),
-                              format_func=labels.get)
+# the list re-sorts per scenario, so remember the chosen municipality ourselves and keep it selected
+options = list(labels)
+st.session_state.setdefault("lau_id", options[0])
+lau_id = st.sidebar.selectbox("Municipality (sorted by exposure in this scenario)", options,
+                              index=options.index(st.session_state["lau_id"]), format_func=labels.get)
+st.session_state["lau_id"] = lau_id
 st.sidebar.caption("⚠ = EMS mapped less than half of the municipality.")
 
 muni = munis[munis["LAU_ID"] == lau_id].iloc[0]
