@@ -23,6 +23,7 @@ Without it the map falls back to satellite imagery only.
    python pipeline/build_roads.py           # 5: roads (EMS) and railway lines (Infrabel)
    python pipeline/build_population.py      # 6: population and age
    python pipeline/build_quality.py         # 7: data-quality flags and limits
+   python pipeline/build_access.py          # 9: dry walking routes to shelters (8 runs inside build_facilities.py)
    ```
    Stop the app first: on Windows a running app keeps `app_data/buildings.parquet` locked.
    External files to download once into `data/external/`:
@@ -33,6 +34,7 @@ Without it the map falls back to satellite imagery only.
    - `demographics/eurostat_census_grid_2021_v3/ESTAT_Census_2021_V3_BE.csv`: Belgian rows of
      https://gisco-services.ec.europa.eu/census/2021/Eurostat_Census-GRID_2021_V3.zip
    - OpenStreetMap shelter candidates are downloaded automatically (cached in `data/external/osm/`).
+   - `osm/geofabrik/belgium-latest.osm.pbf` (about 700 MB): https://download.geofabrik.de/europe/belgium-latest.osm.pbf
 2. Start the app:
    ```
    python -m streamlit run app/app.py

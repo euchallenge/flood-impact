@@ -25,6 +25,7 @@ DEPTH_COLORS = {1: "#9ecae1", 2: "#4292c6", 3: "#2171b5", 4: "#08306b"}
 OBSERVED_COLOR = "#e6550d"
 CELL_M = 250                                       # optional layer: buildings aggregated per 250 m cell
 MAX_POINTS = 5000                                  # building dots on the map (a random sample above this)
+ACCESS_COLORS = {"≤ 30 min walk": "#1a9850", "> 30 min walk": "#fdae61", "No dry route": "#d73027"}
 USE_COLORS = {"Residential": "#e41a1c", "Non-residential": "#377eb8", "Outside built-up area": "#999999"}
 SUSPECT_DEPTH_M = 10                               # deeper cells are likely river channel or artefacts (step 7)
 HEIGHT_FLOOR_M = 2.5                               # OBAT minimum height: not a measured value
@@ -65,7 +66,9 @@ def load():
     if (DATA / "roads_stats.parquet").exists():
         roads = {"stats": pd.read_parquet(DATA / "roads_stats.parquet"),
                  **{k: gpd.read_file(DATA / "roads.gpkg", layer=f"flooded_{k}") for k in SCENARIOS.values()}}
-    return munis, extents, buildings, meta, facilities, roads
+    access = (gpd.read_parquet(io.BytesIO((DATA / "access.parquet").read_bytes()))
+              if (DATA / "access.parquet").exists() else None)
+    return munis, extents, buildings, meta, facilities, roads, access
 
 
 @st.cache_data
@@ -90,7 +93,7 @@ def building_cells(lau_id, key):
 if not (DATA / "metadata.json").exists():
     st.error("No data yet: run `python pipeline/build_wallonia.py` first.")
     st.stop()
-munis, extents, buildings, meta, facilities, roads = load()
+munis, extents, buildings, meta, facilities, roads, access = load()
 has_pop = "pop_census" in buildings.columns
 
 # ---------------- sidebar ----------------
@@ -176,6 +179,19 @@ if roads is not None:
     c[0].metric("Main roads flooded", f"{km.get('Road', 0):.1f} km", "highways, primary, secondary", delta_color="off")
     c[1].metric("Railway lines flooded", f"{km.get('Railway', 0):.1f} km", "Infrabel lines in service", delta_color="off")
 
+acc = None
+if access is not None:
+    acc = access[(access["LAU_ID"] == muni["LAU_ID"]) & (access[f"pop_exposed_{key}"] > 0)]
+    if roads is None:                              # otherwise share the roads row
+        c = st.columns(4)
+    no_route = acc.loc[acc[f"shelter_{key}"] < 0, f"pop_exposed_{key}"].sum()
+    c[2].metric("People in flood cells with no dry route", f"{no_route:,.0f}",
+                f"of {acc[f'pop_exposed_{key}'].sum():,.0f} · 'go up, not out'", delta_color="off")
+    walk = acc[f"walk_min_{key}"].dropna()
+    c[3].metric("Median walk to a dry shelter", f"{walk.median():.0f} min" if len(walk) else "–",
+                f"PRM: {acc[f'prm_min_{key}'].dropna().median():.0f} min" if acc[f"prm_min_{key}"].notna().any()
+                else "PRM: no dry route", delta_color="off")
+
 # ---------------- tabs ----------------
 tab_map, tab_shel, tab_pop, tab_road, tab_cmp, tab_bld, tab_lim = st.tabs(
     ["Map", "Shelters", "Population", "Roads & rail", "Compare with 2021", "Buildings", "Data & limits"])
@@ -212,6 +228,15 @@ with tab_map:
         folium.GeoJson(dots, name="Flooded buildings (by use)",
                        marker=folium.CircleMarker(radius=3, weight=0.5, fill=True, fill_opacity=0.9),
                        style_function=lambda f: {"color": "#333", "fillColor": USE_COLORS[f["properties"]["kind"]]},
+                       tooltip=folium.GeoJsonTooltip(["tip"], labels=False)).add_to(m)
+    if acc is not None and not acc.empty:
+        band = np.select([acc[f"shelter_{key}"] < 0, acc[f"walk_min_{key}"] > 30], ["No dry route", "> 30 min walk"],
+                         "≤ 30 min walk")
+        folium.GeoJson(gpd.GeoDataFrame({"band": band, "tip": band + " · " + acc[f"pop_exposed_{key}"].round().astype(int)
+                                         .astype(str) + " people in flood cells"}, geometry=acc.geometry.values, crs=4326),
+                       name=f"Access to a dry shelter ({CELL_M} m areas)", show=False,
+                       marker=folium.CircleMarker(radius=7, weight=1, fill=True, fill_opacity=0.8),
+                       style_function=lambda f: {"color": "#333", "fillColor": ACCESS_COLORS[f["properties"]["band"]]},
                        tooltip=folium.GeoJsonTooltip(["tip"], labels=False)).add_to(m)
     cells = building_cells(muni["LAU_ID"], key)
     if not cells.empty:
@@ -261,6 +286,9 @@ with tab_shel:
             "Status": fac[status_col],
             **({"Rough capacity": fac[f"capacity_{key}"], "PRM access": fac[f"prm_{key}"]}
                if f"capacity_{key}" in fac else {}),
+            **({"Assigned people": fac[f"load_{key}"],
+                "Over capacity": np.where(fac[f"load_{key}"] > fac[f"capacity_{key}"], "⚠ yes", "")}
+               if f"load_{key}" in fac else {}),
             "Flooded in 2021": fac["flooded_2021"].map({True: "yes", False: "no"}),
         }).sort_values(["Status", "Type"])
         st.dataframe(table, hide_index=True, width="stretch")
@@ -271,7 +299,9 @@ with tab_shel:
                    "surveyed values. Rough capacity = largest building's footprint × up to 2 dry storeys × 50% usable ÷ "
                    "3.5 m² per person (Sphere minimum): a theoretical maximum, not an official capacity. Hospitals get "
                    "no capacity (critical sites to protect). PRM access comes from the OpenStreetMap 'wheelchair' tag "
-                   "(mapped for few buildings); upper-floor shelters likely need stairs. Access roads not yet checked. "
+                   "(mapped for few buildings); upper-floor shelters likely need stairs. Assigned people = residents of "
+                   "flood cells whose nearest dry shelter (walking, OpenStreetMap paths with flooded segments removed) "
+                   "is this one. "
                    "Facility locations: © OpenStreetMap contributors.")
 
 with tab_pop:
