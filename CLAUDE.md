@@ -24,6 +24,9 @@ Repo: https://github.com/euchallenge/flood-impact (private). Plan and status: se
 - `app_data/` – precomputed outputs (committed so the app runs after cloning)
 - `data/external/` – external downloads (gitignored): GISCO LAU, OSM, Statbel, Eurostat census grid, OBAT docs
 
+Deploy: admin view on Streamlit Community Cloud (`requirements.txt` is app only; pipeline uses
+`requirements-pipeline.txt`). Streamlit can't run on Vercel; Vercel only serves the static `resident/` folder.
+
 Run order: `build_wallonia.py` → `build_facilities.py both` → `build_roads.py` → `build_population.py` →
 `build_quality.py`, then `python -m streamlit run app/app.py`. After rebuilding data, clear the Streamlit cache
 (press C) or restart. Write parquet files only through `common.save_parquet` (temp file + swap): a direct overwrite

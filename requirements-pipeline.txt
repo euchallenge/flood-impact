@@ -1,0 +1,5 @@
+# Pipeline steps (read the challenge bucket and external data); the app needs only requirements.txt
+-r requirements.txt
+gcsfs
+rasterio
+requests

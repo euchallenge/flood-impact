@@ -5,7 +5,8 @@ observed July 2021 extent from Copernicus EMS) and see the flooded area and expo
 
 ## Setup
 ```
-pip install -r requirements.txt
+pip install -r requirements.txt            # app only
+pip install -r requirements-pipeline.txt   # also needed to rebuild the data (adds gcsfs, rasterio)
 ```
 Create a `.env` file in the project root (never commit it):
 ```
@@ -36,6 +37,15 @@ Without it the map falls back to satellite imagery only.
    ```
    python -m streamlit run app/app.py
    ```
+
+## Deploy
+- **Administration view (Streamlit):** Streamlit Community Cloud (share.streamlit.io), repo `euchallenge/flood-impact`,
+  branch `main`, main file `app/app.py`, Python 3.13. It installs `requirements.txt` and reads `app_data/` from the repo.
+  Leave the CARTO key out of the app's secrets: tile URLs carry it to every viewer's browser. Without it the map
+  uses OpenStreetMap and Esri tiles.
+- **Not on Vercel:** Vercel Functions can't hold Streamlit's WebSocket connection, so the build fails on `app/app.py`.
+  Vercel is for the static resident view: set the Vercel project's Root Directory to `resident` (framework preset
+  "Other") once that folder exists.
 
 ## Data and limits
 - Challenge data: Copernicus EMS EMSR518 (MONIT01 products), EFAS flood hazard, GHS-OBAT buildings.
