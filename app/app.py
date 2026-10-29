@@ -3,7 +3,7 @@
 Reads only the precomputed files in app_data/ (built by pipeline/build_wallonia.py).
 Run from the project folder:  python -m streamlit run app/app.py
 """
-import io, os, json
+import html, io, os, json
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -25,6 +25,7 @@ DEPTH_COLORS = {1: "#9ecae1", 2: "#4292c6", 3: "#2171b5", 4: "#08306b"}
 OBSERVED_COLOR = "#e6550d"
 CELL_M = 250                                       # optional layer: buildings aggregated per 250 m cell
 MAX_POINTS = 5000                                  # building dots on the map (a random sample above this)
+RISK_LEVELS = {1: ("🔴", "High", "#d73027"), 2: ("🟠", "Medium", "#fc8d59"), 3: ("🟡", "Low", "#e6c200")}
 ACCESS_COLORS = {"≤ 30 min walk": "#1a9850", "> 30 min walk": "#fdae61", "No dry route": "#d73027"}
 USE_COLORS = {"Residential": "#e41a1c", "Non-residential": "#377eb8", "Outside built-up area": "#999999"}
 SUSPECT_DEPTH_M = 10                               # deeper cells are likely river channel or artefacts (step 7)
@@ -52,7 +53,9 @@ CATEGORY_ICONS = {"School": "🏫", "Hospital": "🏥", "Church": "⛪", "Stadiu
 EXPOSED_COL = {"rp10": "buildings_rp10", "rp100": "buildings_rp100", "rp500": "buildings_rp500",
                "observed_2021": "buildings_flooded_2021"}
 
-st.set_page_config(page_title="Flood impact card", page_icon="🌊", layout="wide")
+ASSETS = Path(__file__).resolve().parent / "assets"
+st.set_page_config(page_title="walert · administration", page_icon=str(ASSETS / "icon.png"), layout="wide")
+st.logo(str(ASSETS / "logo_horizontal.png"), size="large", icon_image=str(ASSETS / "icon.png"))
 
 
 @st.cache_resource
@@ -69,7 +72,8 @@ def load():
                  **{k: gpd.read_file(DATA / "roads.gpkg", layer=f"flooded_{k}") for k in SCENARIOS.values()}}
     access = (gpd.read_parquet(io.BytesIO((DATA / "access.parquet").read_bytes()))
               if (DATA / "access.parquet").exists() else None)
-    return munis, extents, buildings, meta, facilities, roads, access
+    risks = pd.read_parquet(DATA / "risks.parquet") if (DATA / "risks.parquet").exists() else None
+    return munis, extents, buildings, meta, facilities, roads, access, risks
 
 
 @st.cache_data
@@ -94,11 +98,11 @@ def building_cells(lau_id, key):
 if not (DATA / "metadata.json").exists():
     st.error("No data yet: run `python pipeline/build_wallonia.py` first.")
     st.stop()
-munis, extents, buildings, meta, facilities, roads, access = load()
+munis, extents, buildings, meta, facilities, roads, access, risks = load()
 has_pop = "pop_census" in buildings.columns
 
 # ---------------- sidebar ----------------
-st.sidebar.title("🌊 Flood impact card")
+st.sidebar.caption("Administration view · flood impact and shelter planning")
 if "query_applied" not in st.session_state:        # links from the resident view: ?m=<LAU_ID>&s=<scenario>
     st.session_state["query_applied"] = True
     q = st.query_params
@@ -150,6 +154,25 @@ if observed:
 elif muni["rp500_km2"] == 0:
     st.warning(f"EFAS models no river in the mapped part of {name}. 0 means 'not modelled', not 'no flood risk': "
                "small streams and surface runoff are not covered.")
+
+def issue_html(row):
+    icon, word, color = RISK_LEVELS[row.level]
+    return (f"<div style='border-left:6px solid {color};padding:6px 10px;margin:4px 0;"
+            f"background:rgba(127,127,127,.08);border-radius:4px'>{icon} <b>{word} · {html.escape(row.issue)}</b><br>"
+            f"{html.escape(row.text)}<br><span style='opacity:.8'>→ {html.escape(row.action)}</span></div>")
+
+
+if risks is not None:                              # priority issues first: what this municipality must look at
+    r = risks[(risks["LAU_ID"] == muni["LAU_ID"]) & (risks["scenario"] == key)]
+    n = r["level"].value_counts()
+    st.subheader(f"Priority issues · {n.get(1, 0)} 🔴 · {n.get(2, 0)} 🟠 · {n.get(3, 0)} 🟡")
+    if r.empty:
+        st.success("No issue found with the available data for this scenario (this is not a guarantee).")
+    st.markdown("".join(issue_html(x) for x in r[r["level"] < 3].itertuples()), unsafe_allow_html=True)
+    if (r["level"] == 3).any():
+        with st.expander(f"{(r['level'] == 3).sum()} lower-priority items 🟡"):
+            st.markdown("".join(issue_html(x) for x in r[r["level"] == 3].itertuples()), unsafe_allow_html=True)
+    st.caption("Levels come from screening thresholds (see the 'All municipalities' tab), not official standards.")
 
 flooded_km2 = muni[f"{key}_km2"]
 c = st.columns(4)
@@ -205,8 +228,40 @@ if access is not None:
                 else "PRM: no dry route", delta_color="off")
 
 # ---------------- tabs ----------------
-tab_map, tab_shel, tab_pop, tab_road, tab_cmp, tab_bld, tab_lim = st.tabs(
-    ["Map", "Shelters", "Population", "Roads & rail", "Compare with 2021", "Buildings", "Data & limits"])
+tab_map, tab_all, tab_shel, tab_pop, tab_road, tab_cmp, tab_bld, tab_lim = st.tabs(
+    ["Map", "All municipalities", "Shelters", "Population", "Roads & rail", "Compare with 2021", "Buildings",
+     "Data & limits"])
+
+with tab_all:
+    if risks is None:
+        st.write("Priorities not computed yet: run `python pipeline/build_risks.py`.")
+    else:
+        st.subheader(f"Triage of all municipalities – {label}")
+        r = risks[risks["scenario"] == key].merge(munis[["LAU_ID", "name"]])
+        t = r.pivot_table(index="name", columns="level", values="issue", aggfunc="count", fill_value=0)
+        t = t.reindex(columns=[1, 2, 3], fill_value=0).rename(columns={k: v[0] for k, v in RISK_LEVELS.items()})
+        reds = r[r["level"] == 1].groupby("name")["issue"].agg(" · ".join)
+        t["High-priority issues"] = t.index.map(reds).fillna("")
+        t = t.reindex(munis["name"]).fillna({"High-priority issues": ""}).fillna(0)
+        t = t.sort_values(["🔴", "🟠", "🟡"], ascending=False).astype({c: int for c in ["🔴", "🟠", "🟡"]})
+        st.dataframe(t, width="stretch", height=480)
+        st.download_button("Download as CSV", t.to_csv().encode("utf-8"), f"triage_{key}.csv", "text/csv")
+        with st.expander("How priorities are set"):
+            st.markdown(
+                "Screening thresholds per municipality and scenario (assumptions, adjustable in "
+                "`pipeline/build_risks.py`). People = residents of flood cells.\n"
+                "- **No dry route:** 🔴 ≥ 1,000 people, or ≥ 30% and ≥ 200 · 🟠 ≥ 200, or ≥ 10% and ≥ 50 · 🟡 any\n"
+                "- **No usable shelter** while people live in flood cells: 🔴\n"
+                "- **Shelter capacity gap** (people ÷ rough usable capacity): 🔴 > 100% · 🟠 > 50% · 🟡 > 25%\n"
+                "- **Overloaded shelters** (people above capacity): 🔴 ≥ 1,000 or ≥ 50% · 🟠 ≥ 200 or ≥ 20% · 🟡 any\n"
+                "- **Elderly (65+) in flood cells:** 🔴 ≥ 1,000 · 🟠 ≥ 300 · 🟡 any\n"
+                "- **No step-free route (PRM):** 🔴 ≥ 500 · 🟠 ≥ 100 · 🟡 any\n"
+                "- **Walk > 30 min to a dry shelter:** 🔴 ≥ 500 · 🟠 ≥ 100 · 🟡 any\n"
+                "- **Homes with no dry floor** (height ≤ cell depth + 1 m): 🔴 ≥ 500 · 🟠 ≥ 100 · 🟡 any\n"
+                "- **Hospital** in the extent: 🔴 not usable · 🟠 upper floors only\n"
+                "- **School** in the extent: 🟠 not usable · 🟡 upper floors only\n"
+                "- **Main roads / railway lines flooded:** 🟠 ≥ 20% of the mapped network · 🟡 any\n"
+                "- **Dams or weirs within ~2 km, data gaps** (no modelled river, < 50% mapped): 🟡")
 
 with tab_map:
     bounds = muni.geometry.bounds

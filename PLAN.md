@@ -56,7 +56,9 @@ Scope: Walloon municipalities covered by EMS EMSR518 (66). Germany and the Nethe
 | 9 | **Dry access:** OSM walking network (Geofabrik extract, 1.5 M segments); per scenario, flooded segments and bridges removed; nearest usable shelter with capacity from each 250 m residential cell, walking and PRM (no steps); shelter load vs capacity. RP100: 56,486 of 138,281 people in flood cells have no dry route within 300 m + 15 km. 394 rural cells get no route even when dry (to investigate) | ✅ | `access.parquet`, `facilities.gpkg` |
 | 10 | **Vulnerability:** vulnerable sites (care homes, schools) in the extent; homes with no dry floor per cell (height ≤ depth + 1 m, aggregated, never per house) | ⏳ P1 | `cells.parquet` |
 | 11 | **Shelter gap and evacuation priority** per 250 m cell and municipality: exposed people (by age), no dry route, no dry floor | ⏳ P2 | `cells.parquet`, `municipalities.gpkg` |
-| 12 | **Critical networks:** power lines and substations, gas pipelines, telecom masts and exchanges in each flood extent | ⏳ P2 | `utilities.gpkg` |
+| 12 | **Utilities:** electricity, drinking water and gas sites in each flood extent (see "Utilities plan" below) | ⏳ P2 | `utilities.gpkg` |
+| 15 | **Priority issues per municipality and scenario** (admin view, top of the page, 🔴/🟠/🟡 from screening thresholds): no dry route, no usable shelter, capacity gap, overloaded shelters, 65+, PRM, long walks, homes with no dry floor, hospitals, schools, roads, railways, dams, data gaps; plus an "All municipalities" triage tab | ✅ | `risks.parquet` |
+| 14 | **Dams and weirs** as keep-away zones for residents (EMS 2152 + OSM `waterway=dam/weir`, 300 m / 100 m) | ✅ | `dams.gpkg` |
 | 13 | **KPI export:** one script writing every number used in the brief, app and slides | ⏳ P1 | `app_data/kpis.json` |
 
 ## Apps
@@ -87,6 +89,33 @@ Scope: Walloon municipalities covered by EMS EMSR518 (66). Germany and the Nethe
 6. **Utilities** (step 12) if time allows. OSM coverage of power and gas is partial, so label it. Keep detailed
    critical-infrastructure maps in the admin view only.
 7. **KPI export, brief numbers, AI sheet log, demo script.**
+
+## Utilities plan (electricity, drinking water, gas)
+**Question for the brief:** which utility sites sit in the flood extent, and how many residents could lose power,
+water or gas as a result? In 2021 outages of all three hit the Vesdre valley (to source from SPW / operator reports).
+
+**Data**
+| Network | Open source | What it gives | Status |
+|---|---|---|---|
+| Electricity | OSM in the Geofabrik extract (already downloaded): `power=substation`, `plant`, `transformer`, `line`, `cable` | Substations and high-voltage lines; low-voltage distribution mostly missing | available |
+| Electricity | Elia open data (transmission operator) | Mostly time series; grid geometry to verify | to verify |
+| Drinking water | OSM: `man_made=water_works`, `water_tower`, `reservoir_covered`, `pumping_station`, `water_well` | Treatment plants, towers, reservoirs, pumping stations | available |
+| Drinking water | SPW geoportal (WalOnMap): water abstraction points, protection zones; SWDE / CILE sites | Official sites; distribution pipes are not public | to verify |
+| Gas | OSM: `man_made=pipeline` + `substance=gas`, `pipeline=substation` (pressure reduction stations) | Transmission pipelines and some stations | available, partial |
+| Gas | Fluxys (transmission), ORES / RESA (distribution) | Network maps, not open GIS | to verify |
+| All | EMS `facilitiesL` code 221 (pipelines, communication and electricity lines) | 2 features in AOI02 only | negligible |
+
+**Method (2–3 h, all offline from the Geofabrik extract)**
+1. `pipeline/build_utilities.py`: read the OSM features above (points, lines, areas) within the analysis bbox.
+2. Per scenario: site in a flood cell (EFAS depth > 0 or 2021 extent) = "at risk"; lines and pipes: km in the extent.
+3. Rough service areas: Voronoi polygons around substations and water sites, clipped to municipalities, then
+   residents per area from the population step. Label it a proxy: real service areas are not public.
+4. Admin view: "Utilities" tab (sites at risk per scenario, km of lines and pipes, residents in affected service areas).
+5. Resident view: no locations of critical infrastructure. Only an advice line where a site serving the area is
+   at risk: "power, water or gas may be cut: keep drinking water, charge your phone".
+
+**Limits:** OSM coverage of utilities is partial, especially low-voltage power and gas distribution; locations of
+critical infrastructure stay in the admin view (security).
 
 ## Rules and assumptions
 - Exposed = OBAT centroid inside the observed extent, or in an EFAS cell with depth > 0 (about 90 m cells).

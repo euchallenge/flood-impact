@@ -24,6 +24,9 @@ Without it the map falls back to satellite imagery only.
    python pipeline/build_population.py      # 6: population and age
    python pipeline/build_quality.py         # 7: data-quality flags and limits
    python pipeline/build_access.py          # 9: dry walking routes to shelters (8 runs inside build_facilities.py)
+   python pipeline/build_dams.py            # dams and weirs (keep-away zones)
+   python pipeline/build_risks.py           # 10: priority issues per municipality (admin view)
+   python pipeline/export_resident.py       # data for the resident web app
    ```
    Stop the app first: on Windows a running app keeps `app_data/buildings.parquet` locked.
    External files to download once into `data/external/`:

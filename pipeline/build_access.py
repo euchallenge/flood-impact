@@ -142,11 +142,11 @@ def nearest_shelter(edge_ok, shelters):
     s_d, s_i = tree.query(fac_m[shelters], distance_upper_bound=MAX_SNAP_M)
     ok = np.isfinite(s_d)
     src_nodes, src_fac, src_snap = ids[s_i[ok]], shelters[ok], s_d[ok]
-    out = pd.DataFrame(index=cells.index, data={"shelter": -1, "dist_m": np.inf})
+    out = pd.DataFrame(index=cells.index, data={"shelter": -1, "dist_m": np.inf, "node": -1})
     if len(src_nodes) == 0:
-        return out
-    dist, _, src = dijkstra(graph, directed=False, indices=src_nodes, min_only=True, limit=MAX_ROUTE_M,
-                            return_predecessors=True)
+        return out, None
+    dist, pred, src = dijkstra(graph, directed=False, indices=src_nodes, min_only=True, limit=MAX_ROUTE_M,
+                               return_predecessors=True)
     node_to_fac = dict(zip(src_nodes, zip(src_fac, src_snap)))   # one shelter per node is enough here
     o_d, o_i = tree.query(cells[["x", "y"]].to_numpy(), distance_upper_bound=MAX_SNAP_M)
     found = np.isfinite(o_d)
@@ -157,16 +157,39 @@ def nearest_shelter(edge_ok, shelters):
     fac_snap = np.array([node_to_fac[x] for x in src[o_nodes[reach]]])
     out.loc[rows_, "shelter"] = fac_snap[:, 0].astype(int)
     out.loc[rows_, "dist_m"] = d[reach] + o_d[found][reach] + fac_snap[:, 1]
-    return out
+    out.loc[rows_, "node"] = o_nodes[reach]        # start node of the route; follow pred[] to the shelter
+    return out, pred
+
+
+def route_tree(start, pred, scenario, mode):
+    """Per municipality, the nodes on the routes of its cells, each with its next node towards the shelter.
+    Routes share streets, so this tree is far smaller than one line per cell."""
+    if pred is None:
+        return pd.DataFrame()
+    parts = []
+    for lau, nodes in start[start >= 0].groupby(cells["LAU_ID"]):
+        frontier = all_nodes = np.unique(nodes.to_numpy())
+        while frontier.size:
+            nxt = pred[frontier]
+            frontier = np.setdiff1d(nxt[nxt >= 0], all_nodes)
+            all_nodes = np.union1d(all_nodes, frontier)
+        parts.append(pd.DataFrame({"LAU_ID": lau, "scenario": scenario, "mode": mode, "node": all_nodes,
+                                   "next": np.where(pred[all_nodes] >= 0, pred[all_nodes], -1)}))
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
 # ---------------- routing per scenario ----------------
 steps = (seg["highway"] == "steps").to_numpy()
+trees = []
 for k in SCENARIOS:
     usable = fac[f"shelter_{k}"].isin(USABLE) & (fac[f"capacity_{k}"] > 0)
     prm_ok = usable & ~fac[f"prm_{k}"].isin(["No (OSM)", "Upper floors only: stairs likely"])
-    walk = nearest_shelter(~wet[k], np.flatnonzero(usable.to_numpy()))
-    prm = nearest_shelter(~wet[k] & ~steps, np.flatnonzero(prm_ok.to_numpy()))
+    walk, walk_pred = nearest_shelter(~wet[k], np.flatnonzero(usable.to_numpy()))
+    prm, prm_pred = nearest_shelter(~wet[k] & ~steps, np.flatnonzero(prm_ok.to_numpy()))
+    cells[f"node_{k}"], cells[f"prm_node_{k}"] = walk["node"].astype(int), prm["node"].astype(int)
+    in_flood = cells[f"pop_exposed_{k}"] > 0       # exact routes only where people may need to leave
+    trees += [route_tree(cells[f"node_{k}"].where(in_flood, -1), walk_pred, k, "walk"),
+              route_tree(cells[f"prm_node_{k}"].where(in_flood, -1), prm_pred, k, "prm")]
     cells[f"shelter_{k}"], cells[f"walk_min_{k}"] = walk["shelter"], (walk["dist_m"] / WALK_M_PER_MIN).round(1)
     cells[f"prm_shelter_{k}"], cells[f"prm_min_{k}"] = prm["shelter"], (prm["dist_m"] / PRM_M_PER_MIN).round(1)
     load = cells[cells[f"shelter_{k}"] >= 0].groupby(f"shelter_{k}")[f"pop_exposed_{k}"].sum()
@@ -176,6 +199,11 @@ for k in SCENARIOS:
     log(f"{k}: {usable.sum():,} usable shelters; people in flood cells without a dry route within "
         f"{MAX_ROUTE_M / 1000:.0f} km: {no_route:,.0f} of {exposed.sum():,.0f}; "
         f"median walk {cells.loc[exposed > 0, f'walk_min_{k}'].replace(np.inf, np.nan).median():.0f} min")
+
+routes = pd.concat(trees, ignore_index=True)
+routes["lon"], routes["lat"] = node_xy[routes["node"], 0].round(6), node_xy[routes["node"], 1].round(6)
+save_parquet(routes, OUT / "routes.parquet")
+log(f"route trees: {len(routes):,} nodes ({routes.groupby('mode').size().to_dict()})")
 
 cells = cells.replace(np.inf, np.nan)
 lon, lat = Transformer.from_crs(EQUAL_AREA, 4326, always_xy=True).transform(cells["x"].to_numpy(), cells["y"].to_numpy())

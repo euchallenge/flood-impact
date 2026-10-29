@@ -30,6 +30,9 @@ log = lambda msg: print(f"[{time.time() - t0:6.0f}s] {msg}", flush=True)
 munis = gpd.read_file(DATA / "municipalities.gpkg")
 fac = gpd.read_file(DATA / "facilities.gpkg")
 cells = gpd.read_parquet(DATA / "access.parquet")
+routes = pd.read_parquet(DATA / "routes.parquet")
+dams = gpd.read_file(DATA / "dams.gpkg") if (DATA / "dams.gpkg").exists() else None
+DAM_MARGIN_DEG = 0.05                              # ~5 km: dams upstream of a municipality matter to its residents
 extents = {k: gpd.read_file(DATA / "flood_extents.gpkg", layer=k) for k in SCENARIOS}
 pt = fac.geometry.representative_point()
 fac["lat"], fac["lon"] = pt.y.round(5), pt.x.round(5)
@@ -67,13 +70,26 @@ for mu in munis.itertuples():
         "shelters": [[int(i), r.name or "", CATEGORIES.index(r.category), r.lat, r.lon, r.LAU_ID == mu.LAU_ID,
                       {k: [int(getattr(r, f"s_{k}")), int(getattr(r, f"capacity_{k}")), int(getattr(r, f"p_{k}"))]
                        for k in SCENARIOS}] for i, r in zip(f.index, f.itertuples())],
-        # cell: [lat, lon, {scenario: [in a flood cell, shelter id, walk min, PRM shelter id, PRM min]}]
+        # cell: [lat, lon, {scenario: [in a flood cell, shelter id, walk min, PRM shelter id, PRM min,
+        #                               walk route start node, PRM route start node]}]  (start -1: no exact route)
         "cells": [[round(r.geometry.y, 5), round(r.geometry.x, 5),
                    {k: [int(getattr(r, f"pop_exposed_{k}") > 0), int(getattr(r, f"shelter_{k}")),
                         None if pd.isna(getattr(r, f"walk_min_{k}")) else round(getattr(r, f"walk_min_{k}")),
                         int(getattr(r, f"prm_shelter_{k}")),
-                        None if pd.isna(getattr(r, f"prm_min_{k}")) else round(getattr(r, f"prm_min_{k}"))]
+                        None if pd.isna(getattr(r, f"prm_min_{k}")) else round(getattr(r, f"prm_min_{k}")),
+                        *[int(getattr(r, col)) if getattr(r, f"pop_exposed_{k}") > 0 else -1
+                          for col in (f"node_{k}", f"prm_node_{k}")]]
                     for k in SCENARIOS}] for r in c.itertuples()],
+        # dam or weir keep-away zone: [0 dam / 1 weir, name, radius m, lat, lon]
+        "dams": [] if dams is None else [
+            [0 if d.kind == "Dam" else 1, d.name or "", int(d.zone_m), round(p.y, 5), round(p.x, 5)]
+            for d, p in zip(dams.itertuples(), dams.geometry.representative_point())
+            if mu.geometry.bounds[0] - DAM_MARGIN_DEG <= p.x <= mu.geometry.bounds[2] + DAM_MARGIN_DEG
+            and mu.geometry.bounds[1] - DAM_MARGIN_DEG <= p.y <= mu.geometry.bounds[3] + DAM_MARGIN_DEG],
+        # route tree per scenario and mode: [node, next node towards the shelter (-1 = at the shelter), lat, lon]
+        "routes": {k: {mode: g[["node", "next", "lat", "lon"]].values.tolist()
+                       for mode, g in routes[(routes["LAU_ID"] == mu.LAU_ID) & (routes["scenario"] == k)].groupby("mode")}
+                   for k in SCENARIOS},
     }
     path = OUT / "m" / f"{mu.LAU_ID}.json"
     path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

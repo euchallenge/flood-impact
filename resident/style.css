@@ -1,6 +1,6 @@
 :root {
   --bg: #ffffff; --fg: #1d1d1f; --muted: #5f6368; --line: #d9dce1; --card: #f6f7f9;
-  --accent: #0b5cad; --accent-fg: #ffffff; --warn-bg: #fff4e5; --warn-fg: #7a4100;
+  --accent: #173B5E; --accent-fg: #ffffff;         /* walert navy */ --warn-bg: #fff4e5; --warn-fg: #7a4100;
   --ok: #1a7f37; --mid: #b35c00; --bad: #c62828;
 }
 @media (prefers-color-scheme: dark) {
@@ -15,7 +15,10 @@ html, body { margin: 0; background: var(--bg); color: var(--fg);
   font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 10px 16px; border-bottom: 1px solid var(--line); }
-h1 { font-size: 1.15rem; margin: 0; }
+h1 { font-size: .95rem; font-weight: 600; margin: 0; color: var(--muted); }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.logo { height: 44px; width: auto; border-radius: 6px; flex-shrink: 0; }
+@media (max-width: 420px) { .brand h1 { display: none; } }
 .langs button { min-width: 40px; min-height: 36px; margin-left: 4px; border: 1px solid var(--line);
   background: var(--bg); color: var(--fg); border-radius: 6px; cursor: pointer; }
 .langs { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
