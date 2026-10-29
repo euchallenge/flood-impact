@@ -29,6 +29,9 @@ FLOOR_M = 3.0                                      # assumed storey height
 NODE_BUFFER_M = 15                                 # OSM points get a small footprint
 NEAREST_M = 30                                     # max distance to borrow an OBAT height when none falls inside
 HEIGHT_FLOOR_M = 2.5                               # OBAT clamps heights to this minimum: not a measured height
+M2_PER_PERSON = 3.5                                # Sphere minimum covered living space per person
+USABLE_SHARE = 0.5                                 # assumption: half the gross floor area can host people
+MAX_STOREYS = 2                                    # assumption: sheltering uses halls on the lowest dry storeys
 SOURCE = sys.argv[1] if len(sys.argv) > 1 else "both"   # ems | osm | both
 EMS_SHELTERS = {"1263": "School", "1264": "Hospital",    # EMS info codes; sports grounds may be outdoor pitches
                 "2411": "Stadium / sports hall", "2412": "Stadium / sports hall"}
@@ -75,7 +78,8 @@ def osm_candidates():
         cat, geom = category(t), to_geometry(el)
         if cat and geom is not None and not geom.is_empty:
             rows.append({"source_id": f"osm/{el['type']}/{el['id']}", "category": cat, "name": t.get("name", ""),
-                         "religion": t.get("religion", ""), "source": "OpenStreetMap", "geometry": geom})
+                         "religion": t.get("religion", ""), "wheelchair": t.get("wheelchair", ""),
+                         "levels": t.get("building:levels", ""), "source": "OpenStreetMap", "geometry": geom})
     gdf = gpd.GeoDataFrame(rows, crs=4326).to_crs(EQUAL_AREA)
     gdf["geometry"] = [g.buffer(NODE_BUFFER_M) if g.geom_type in ("Point", "LineString") else g.buffer(0)
                        for g in gdf.geometry]
@@ -91,7 +95,7 @@ def ems_candidates():
     code = ems["info"].str.split("-").str[0]
     ems = ems[code.isin(EMS_SHELTERS)]
     gdf = gpd.GeoDataFrame({"source_id": "ems/" + ems.index.astype(str), "category": code[ems.index].map(EMS_SHELTERS),
-                            "name": "", "religion": "", "source": "Copernicus EMS"},
+                            "name": "", "religion": "", "wheelchair": "", "levels": "", "source": "Copernicus EMS"},
                            geometry=ems.geometry.make_valid().values, crs=4326).to_crs(EQUAL_AREA)
     log(f"EMS: {len(gdf):,} candidate features")
     return gdf
@@ -122,17 +126,17 @@ log(f"{len(fac):,} facilities after de-duplication in analysis areas "
 
 # ---------------- height and depth from the OBAT points ----------------
 depth_cols = [f"depth_rp{rp}" for rp in RPS]
-inside = gpd.sjoin(buildings[["height"] + depth_cols + ["geometry"]], fac[["geometry"]], predicate="within")
+inside = gpd.sjoin(buildings[["height", "area"] + depth_cols + ["geometry"]], fac[["geometry"]], predicate="within")
 agg = inside.groupby("index_right").agg(n_obat=("height", "size"), height_m=("height", "max"),
-                                         **{c: (c, "max") for c in depth_cols})
+                                         footprint_m2=("area", "max"), **{c: (c, "max") for c in depth_cols})
 fac = fac.join(agg)
 missing = fac["n_obat"].isna()                     # small OSM footprints with no OBAT centroid inside: nearest building
 if missing.any():
     near = gpd.sjoin_nearest(fac[missing].to_crs(EQUAL_AREA)[["geometry"]],
-                             buildings[["height"] + depth_cols + ["geometry"]].to_crs(EQUAL_AREA),
+                             buildings[["height", "area"] + depth_cols + ["geometry"]].to_crs(EQUAL_AREA),
                              max_distance=NEAREST_M, how="inner")
     near = near[~near.index.duplicated()]
-    fac.loc[near.index, ["height_m"] + depth_cols] = near[["height"] + depth_cols].values
+    fac.loc[near.index, ["height_m", "footprint_m2"] + depth_cols] = near[["height", "area"] + depth_cols].values
     fac.loc[near.index, "n_obat"] = 0
 fac["height_source"] = np.select([fac["n_obat"] > 0, fac["n_obat"] == 0], ["OBAT inside", f"nearest OBAT ≤{NEAREST_M} m"],
                                  "none")
@@ -152,6 +156,33 @@ for rp in RPS:                                     # wet = footprint touches the
         ["Dry: usable", "Wet: upper floors usable", "Wet: height uncertain"], "Wet: not usable")
 fac["height_at_floor"] = fac["height_m"] <= HEIGHT_FLOOR_M
 fac["shelter_observed_2021"] = np.where(fac["flooded_2021"], "Flooded in 2021", "Dry in 2021")
+
+# ---------------- step 8: rough capacity and access for persons with reduced mobility (PRM) ----------------
+# conservative proxy for a hall: the largest OBAT building of the facility (0 = no building, e.g. an outdoor sports
+# ground), on at most MAX_STOREYS dry storeys; storeys from OSM building:levels where mapped, else height / 3 m.
+# Hospitals get no capacity: they are critical sites to protect, not places to send evacuees.
+levels = pd.to_numeric(fac["levels"], errors="coerce")
+fac["storeys"] = levels.where(levels >= 1, (fac["height_m"] / FLOOR_M).round().clip(lower=1)).fillna(1).astype(int)
+fac["footprint_m2"] = fac["footprint_m2"].fillna(0).round()
+per_storey = fac["footprint_m2"] * USABLE_SHARE / M2_PER_PERSON * (fac["category"] != "Hospital")
+fac["storeys"] = fac["storeys"].clip(upper=MAX_STOREYS)
+fac["capacity_dry"] = (per_storey * fac["storeys"]).round().astype(int)
+prm_osm = fac["wheelchair"].map({"yes": "Yes (OSM)", "limited": "Limited (OSM)", "no": "No (OSM)"}).fillna("Unknown")
+for key in ["observed_2021"] + [f"rp{rp}" for rp in RPS]:
+    status = fac[f"shelter_{key}"]
+    if key == "observed_2021":
+        dry_storeys = np.where(fac["flooded_2021"], 0, fac["storeys"])
+    else:                                          # storeys entirely above the modelled water level
+        above = np.floor((fac["height_m"] - fac[f"depth_{key}"]) / FLOOR_M).fillna(0).clip(lower=0)
+        dry_storeys = np.select([status == "Dry: usable", status == "Wet: upper floors usable"],
+                                [fac["storeys"], np.minimum(above, fac["storeys"])], 0)
+    fac[f"capacity_{key}"] = (per_storey * dry_storeys).round().astype(int)
+    fac[f"prm_{key}"] = np.select(
+        [~status.isin(["Dry: usable", "Wet: upper floors usable", "Dry in 2021"]), prm_osm == "No (OSM)",
+         status == "Wet: upper floors usable"],
+        ["Not usable", "No (OSM)", "Upper floors only: stairs likely"], prm_osm)
+log(f"capacity (dry, rough): {fac['capacity_dry'].sum():,} people; no indoor space: {(fac['footprint_m2'] == 0).sum()}; "
+    f"PRM tagged: {(prm_osm != 'Unknown').sum()} ({prm_osm.value_counts().to_dict()})")
 fac["height_m"] = fac["height_m"].round(1)
 fac.drop(columns="area_m2").to_file(OUT / "facilities.gpkg", driver="GPKG")
 log(f"saved {len(fac):,} facilities")
