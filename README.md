@@ -45,9 +45,9 @@ Without it the map falls back to satellite imagery only.
   branch `main`, main file `app/app.py`, Python 3.13. It installs `requirements.txt` and reads `app_data/` from the repo.
   Leave the CARTO key out of the app's secrets: tile URLs carry it to every viewer's browser. Without it the map
   uses OpenStreetMap and Esri tiles.
-- **Not on Vercel:** Vercel Functions can't hold Streamlit's WebSocket connection, so the build fails on `app/app.py`.
-  Vercel is for the static resident view: set the Vercel project's Root Directory to `resident` (framework preset
-  "Other") once that folder exists.
+- **Resident view (Vercel):** `vercel.json` sets the framework to "Other" and serves `resident/` as static files.
+  Streamlit can't run on Vercel (no `app` ASGI/WSGI object, no WebSockets in Vercel Functions), so don't remove it:
+  without it Vercel's Python preset fails on `app/app.py`.
 
 ## Data and limits
 - Challenge data: Copernicus EMS EMSR518 (MONIT01 products), EFAS flood hazard, GHS-OBAT buildings.
