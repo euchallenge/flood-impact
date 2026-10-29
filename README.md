@@ -14,7 +14,8 @@ CARTO_API_KEY=<your CARTO basemaps key>
 Without it the map falls back to satellite imagery only.
 
 ## Run
-1. Build the data (reads the public challenge bucket, about 7 minutes):
+1. Optional: rebuild the data. The precomputed files are already in `app_data/`; the pipeline reads the public
+   challenge bucket and takes about 7 minutes:
    ```
    python pipeline/build_wallonia.py
    ```
