@@ -4,10 +4,15 @@ Hackathon project (FARI × JRC, Brussels, 29–30 Oct 2026) on the July 2021 flo
 a policy brief (Annex 6 template) and an AI sheet (Annex 7). Judged on evidence, policy usefulness, clarity and
 responsible AI use (Annex 4). The annexes in `Annexes/` are the source of truth; don't reconstruct them from memory.
 
-**The tool:** a Streamlit app. Pick a Walloon municipality and a flood severity (EFAS RP10 / RP100 / RP500, or the
-observed July 2021 extent from Copernicus EMS) and see the flooded area, exposed buildings, shelter candidates
-(schools, hospitals, churches, stadiums/sports halls), exposed population by age and the comparison with 2021.
-Intended user: municipal and provincial civil protection / crisis cells.
+**The tool:** a flood-shelter app with two views on the same precomputed data, for a flood severity
+(EFAS RP10 / RP100 / RP500, or the observed July 2021 extent from Copernicus EMS):
+- **Resident view** (mobile first, static web page, planned in `resident/`): candidate shelters outside the modelled
+  flood extent, reachable by a dry road, with access for persons with reduced mobility (PRM) where known.
+  Location stays in the browser; nothing is stored.
+- **Administration view** (Streamlit, `app/app.py`): risk per shelter and municipality, vulnerable groups, flooded roads,
+  railways and networks, comparison with 2021. For mayors, emergency planning officers and governors.
+
+Candidate shelters are not official reception centres. Never write "safe". No flood flags for individual private homes.
 
 Repo: https://github.com/euchallenge/flood-impact (private). Plan and status: see `PLAN.md`.
 
@@ -28,7 +33,9 @@ Run order: `build_wallonia.py` → `build_facilities.py` → `build_population.p
   1.4 GB), GHS-POP 2020.
 - OBAT codes: `use` 0 outside built-up / 1 residential / 2 non-residential; `epoch` 1 <1980, 2 1980s, 3 1990s,
   4 2000s, 5 2010s; `height` is a 100 m cell average, minimum 2.5 m.
-- External: GISCO LAU 2021 (boundaries, `LAU_ID` = NIS code), OpenStreetMap via Overpass (shelter candidates),
+- External: GISCO LAU 2021 (boundaries, `LAU_ID` = NIS code), OpenStreetMap via Overpass (shelter candidates;
+  public servers are often overloaded, `pipeline/osm.py` caches per tile and splits failing tiles),
+  Infrabel main tracks (railways, CC0, `data/external/infrabel/geosporen.geojson`),
   Eurostat Census 2021 1 km grid (age <15 / 15–64 / 65+), Statbel 2021 population by single year of age.
   Always label external data as such. No open disability data per municipality exists; 65+/80+ is the proxy.
 - Known limits to keep visible: EMS 2021 extent misses most flooding in narrow urban valleys (Vesdre);

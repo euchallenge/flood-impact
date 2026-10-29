@@ -2,8 +2,8 @@
 
 Needs the outputs of build_wallonia.py in app_data/.
   - roads: Copernicus EMS transportation lines (highways, primary and secondary roads; no local streets)
-  - railways: OpenStreetMap (external), because EMS maps railways only in AOI02
-Usage: python build_roads.py [osm|ems]   (railway source; default osm, ems needs no download)
+  - railways: Infrabel main tracks (external, CC0, one track per line), because EMS maps railways only in AOI02
+Usage: python build_roads.py [infrabel|osm|ems]   (railway source; default infrabel)
 Writes app_data/roads.gpkg (network + flooded parts per scenario) and app_data/roads_stats.parquet (km per municipality),
 kept apart from municipalities.gpkg so this step can run alongside the population step.
 """
@@ -25,7 +25,8 @@ OSM_FILE = BASE / "data/external/osm/railways_overpass.json"
 EQUAL_AREA = 3035
 SCENARIOS = ["observed_2021", "rp10", "rp100", "rp500"]
 ROAD_CLASSES = {"2111": "Highway", "21120": "Primary road", "21121": "Secondary road"}   # EMS info codes
-RAIL_SOURCE = sys.argv[1] if len(sys.argv) > 1 else "osm"   # osm | ems (EMS has railways in AOI02 only)
+RAIL_SOURCE = sys.argv[1] if len(sys.argv) > 1 else "infrabel"   # infrabel | osm | ems (EMS: AOI02 only)
+INFRABEL_FILE = BASE / "data/external/infrabel/geosporen.geojson"  # main tracks, CC0, opendata.infrabel.be
 EMS_RAIL_CLASSES = {"2121": "Railway", "21220": "Tram / light rail"}
 RAIL_TAGS = {"rail": "Railway", "light_rail": "Tram / light rail", "tram": "Tram / light rail",
              "narrow_gauge": "Railway"}
@@ -58,8 +59,16 @@ roads["class"] = roads["info"].str.split("-").str[0].map(ROAD_CLASSES).fillna("O
 roads["name"] = roads["name"].replace("Unknown", "")
 log(f"EMS: {len(roads):,} road lines")
 
-# ---------------- railways (OSM, or EMS as a quick fallback) ----------------
-if RAIL_SOURCE == "osm":
+# ---------------- railways (Infrabel by default; OSM or EMS as alternatives) ----------------
+if RAIL_SOURCE == "infrabel":
+    tracks = gpd.read_file(INFRABEL_FILE)
+    tracks = tracks[(tracks["exploitation"] == "In operation") & tracks.geom_type.str.contains("LineString")]
+    # one track per line (track A where the line has one) so parallel tracks don't double the km
+    first = tracks.groupby("linecnum")["trackname"].transform("min")
+    tracks = tracks[tracks["trackname"] == first]
+    rails = gpd.GeoDataFrame({"mode": "Railway", "class": "Railway", "name": "Line " + tracks["linecalfa"].astype(str)},
+                             geometry=tracks.geometry.values, crs=tracks.crs).to_crs(4326)
+elif RAIL_SOURCE == "osm":
     data = osm.fetch([("railway", v) for v in RAIL_TAGS], munis.total_bounds, OSM_FILE, log)
     rows = [{"mode": "Railway", "class": RAIL_TAGS[el["tags"]["railway"]], "name": el["tags"].get("name", ""),
              "geometry": LineString([(p["lon"], p["lat"]) for p in el["geometry"]])}

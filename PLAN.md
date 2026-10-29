@@ -1,36 +1,103 @@
 # Plan and status
 
-Scope now: Walloon municipalities covered by EMS EMSR518 (66 municipalities, AOI01 Liège/Vesdre, AOI02 Rochefort area).
-Scale to Germany / Netherlands only after the Walloon version is complete.
+## Goal
+A flood-shelter app with two views, built on the same precomputed data (`app_data/`):
+
+1. **Resident view (mobile first, also desktop).** Pick your municipality, or let the browser locate you, and a
+   flood severity. See the nearest candidate shelters that are **outside the modelled flood extent**, reachable by
+   a **road that is not flooded**, and marked for **access for persons with reduced mobility (PRM)** where known.
+   If no route stays dry, show "go to an upper floor" guidance.
+   Location stays in the browser: nothing is entered, sent or stored.
+2. **Administration view (desktop).** For mayors, emergency planning officers and governors:
+   - flood risk per shelter, per municipality and scenario (depth, access, height, PRM),
+   - the "shelter gap": exposed residents vs dry, reachable shelter capacity,
+   - vulnerable groups (children, 65+, 80+, care homes, PRM proxy),
+   - critical networks (roads, railways, power, gas, telecom) under water,
+   - a multi-municipality triage table with CSV export.
+
+Scope: Walloon municipalities covered by EMS EMSR518 (66). Germany and the Netherlands are a "next step" line only.
+
+**Framing rules** (see `docs/IMPROVEMENTS.md` §5–6):
+- **Candidate shelters are not official.** Official reception centres sit in municipal emergency plans (PGUI), which are
+  usually confidential. The app shows *candidate* public buildings, and the administration view lets a municipality
+  mark which ones are official.
+- **Never write "safe".** Write "outside the modelled flood extent".
+- **Permanent banner:** "Not official evacuation guidance. In an emergency call 112 and follow BE-Alert and your municipality."
+- **EFAS is undefended hazard** (it ignores dykes and walls), and the EMS 2021 extent is a lower bound.
+- **No building-level flood flags for private homes.** Show residents shelters and areas, never their own house.
+
+## Data sources
+| Need | Source | Type | Status |
+|---|---|---|---|
+| Flood extent and depth (RP10/100/500) | EFAS | challenge | ✅ |
+| Observed 2021 | Copernicus EMS EMSR518 | challenge | ✅ |
+| Buildings, height, use, age | GHS-OBAT | challenge | ✅ |
+| Population | GHS-POP 2020 + Eurostat Census 2021 grid (age) + Statbel 2021 (80+) | challenge + external | ✅ |
+| Main roads | EMS `transportationL` | challenge | ✅ |
+| Railway lines | Infrabel main tracks (CC0) | external | ✅ |
+| Shelter candidates | OSM + EMS (schools, hospitals, churches, sports halls) | external + challenge | ✅ |
+| Full road network for routing | OSM (Geofabrik Belgium extract, avoids the overloaded Overpass servers) | external | ⏳ |
+| PRM access | OSM `wheelchair` tag on shelters (already in the cached download) | external | ⏳ |
+| Care homes, schools as vulnerable sites | OSM `amenity=nursing_home`, `social_facility` | external | ⏳ |
+| Power, gas, telecom | OSM `power=*`, `man_made=pipeline`, `telecom=*`, masts; Elia / Fluxys open data (to verify) | external | ⏳ |
+| Disability | none open at municipal level; 65+/80+ as proxy | – | ❌ (ask AVIQ / IWEPS) |
 
 ## Pipeline
-
 | # | Step | Status | Output |
 |---|------|--------|--------|
-| 1 | Analysis areas: LAU 2021 municipalities clipped to the EMS areas of interest, with coverage share | ✅ done | `municipalities.gpkg` |
-| 2 | Flood extents: observed 2021 (EMS MONIT01) and EFAS RP10/100/500 in depth classes, permanent water removed | ✅ done | `flood_extents.gpkg` |
-| 3 | Buildings: OBAT points with EFAS depth per scenario and flooded-in-2021 flag | ✅ done | `buildings.parquet` |
-| 4 | Shelter candidates (schools, hospitals, churches, stadiums/sports halls from OSM): height, depth, flooded or not, shelter status per scenario; EMS building category for every building | 🔄 running (OSM download) | `facilities.gpkg`, `buildings.parquet` |
-| 5 | Roads: km flooded per scenario and road class (EMS `transportationL`) | ⏳ to do | |
-| 6 | Population: inhabitants and age (<15, 15–64, 65+, 80+ estimate), total and exposed, range from two sources | 🟡 script written, to run after step 4 | `buildings.parquet`, `municipalities.gpkg` |
-| 7 | Vulnerability: residential buildings with no dry floor (height ≤ depth + 1 m); shelter rule already in step 4 | ⏳ to do | |
-| 8 | Evacuation priority: 250 m cells scored by depth × people × vulnerable share, extra weight for schools/hospitals/80+ | ⏳ to do | |
-| 9 | Comparison with 2021: hit / missed / over-predicted buildings per scenario | ✅ in the app | |
+| 1 | Analysis areas: LAU 2021 municipalities clipped to the EMS areas, with coverage share | ✅ | `municipalities.gpkg` |
+| 2 | Flood extents: observed 2021 and EFAS RP10/100/500 in depth classes, permanent water removed | ✅ | `flood_extents.gpkg` |
+| 3 | Buildings: OBAT points with depth per scenario and flooded-in-2021 flag | ✅ | `buildings.parquet` |
+| 4 | Shelter candidates: height, depth, flooded or not, status per scenario; EMS category per building | ✅ 2,346 | `facilities.gpkg` |
+| 5 | Roads (EMS) and railway lines (Infrabel): km flooded per scenario | ✅ | `roads.gpkg`, `roads_stats.parquet` |
+| 6 | Population and age, total and exposed (two-source range) | ✅ | `buildings.parquet`, `municipalities.gpkg` |
+| 7 | **Data-quality flags** from the review: no EFAS coverage east of 5.94°, depths > 10 m, 2.5 m height floor, depth inversions, depth unit in metres | ⏳ P0 | flags in `buildings.parquet`, `facilities.gpkg` |
+| 8 | **Shelter attributes:** PRM access (OSM `wheelchair`), rough capacity (floor area × storeys ÷ 3.5 m² per person, the Sphere minimum, labelled as an assumption) | ⏳ P1 | `facilities.gpkg` |
+| 9 | **Dry access:** OSM road graph for walking and driving; per scenario, remove flooded edges and compute from each 250 m residential cell the nearest reachable dry shelter (distance, walking time) | ⏳ P1 | `access_<scenario>.parquet` |
+| 10 | **Vulnerability:** vulnerable sites (care homes, schools) in the extent; homes with no dry floor per cell (height ≤ depth + 1 m, aggregated, never per house) | ⏳ P1 | `cells.parquet` |
+| 11 | **Shelter gap and evacuation priority** per 250 m cell and municipality: exposed people (by age), no dry route, no dry floor | ⏳ P2 | `cells.parquet`, `municipalities.gpkg` |
+| 12 | **Critical networks:** power lines and substations, gas pipelines, telecom masts and exchanges in each flood extent | ⏳ P2 | `utilities.gpkg` |
+| 13 | **KPI export:** one script writing every number used in the brief, app and slides | ⏳ P1 | `app_data/kpis.json` |
 
-## App
-- ✅ Scenario and municipality pickers (list sorted by exposure, selection kept across scenarios)
-- ✅ Tiles, map (CARTO / OSM / satellite basemaps), Compare with 2021, Buildings, Data & limits tabs
-- 🟡 Shelters and Population tabs (waiting for steps 4 and 6 data)
-- ⏳ Roads layer, vulnerable buildings, evacuation priority list with CSV download
-- Optional: plain-language summary per municipality written by Claude from aggregated numbers only
+## Apps
+**Administration view: Streamlit (existing `app/app.py`)**
+- ✅ Scenario and municipality pickers, map, Shelters, Population, Roads & rail, Compare, Buildings, Data & limits
+- ⏳ P0: review wording fixes (no "ground floor submerged", "in a modelled flood cell"), observed-2021 banner,
+  gate the "% missed" line, "no model coverage" instead of 0, aggregate the building dots to 250 m cells
+- ⏳ P1: shelter risk table per municipality (status, depth, access, PRM, capacity) with CSV export;
+  vulnerable-groups panel; mark official reception sites (kept in the session, never uploaded)
+- ⏳ P2: multi-municipality triage table by province / rescue zone; utilities layer; one-page municipal sheet
+
+**Resident view: mobile-first static web app (new `resident/`)**
+- One HTML page with Leaflet and precomputed JSON per municipality. No server and no secrets, so it can be hosted as
+  static files and also works on desktop.
+- Flow: municipality (or "use my location", processed only in the browser) → severity → up to 3 candidate shelters
+  outside the extent with a dry route: distance, walking time, PRM flag, "not official" label.
+  No dry route: "go to an upper floor, call 112".
+- FR and DE first (Eupen, Kelmis, Lontzen and Raeren are German-speaking), then NL and EN.
+- Basemap: keyless tiles (Esri / OSM) so the CARTO key never reaches the public page.
+
+## Next steps (in order)
+1. **P0 data-quality flags and wording** (step 7 + admin P0): about 1 h. The current numbers otherwise mislead.
+2. **Shelter attributes** (step 8): PRM from the cached OSM tags, rough capacity. About 1 h.
+3. **Road graph and dry access** (step 9): download the Geofabrik Belgium extract once, build the graph for the
+   66 municipalities, route per scenario. About 2–3 h. This is the core of the resident view.
+4. **Resident web app**: first municipality (Pepinster) end to end, then all. About 3 h.
+5. **Admin shelter-risk and vulnerability panels** (steps 10–11). About 2 h.
+6. **Utilities** (step 12) if time allows. OSM coverage of power and gas is partial, so label it. Keep detailed
+   critical-infrastructure maps in the admin view only.
+7. **KPI export, brief numbers, AI sheet log, demo script.**
 
 ## Rules and assumptions
-- Exposed building = OBAT centroid inside the extent (2021) or in an EFAS cell with depth > 0.
-- Storey height 3 m. Shelter: dry = footprint outside the extent; upper floors usable = height − depth ≥ 3 m.
-- Population allocated to residential buildings by volume (footprint × height) within each 1 km cell.
-- EFAS depth unit assumed metres (confirm in Annex 2).
+- Exposed = OBAT centroid inside the observed extent, or in an EFAS cell with depth > 0 (about 90 m cells).
+- Storey height 3 m. Shelter dry = footprint outside the extent; upper floors usable = height − depth ≥ 3 m.
+- Population split over residential buildings by volume within each 1 km cell; range from two sources.
+- Capacity (planned): 3.5 m² per person, floor area × storeys. This is a rough planning proxy, not official capacity.
+- EFAS depth in metres (JRC README v3.1.1, per the review; check).
 
 ## Open questions for the team
-- Named public actor for the brief (e.g. Liège province crisis cell, Walloon regional crisis centre).
-- Is there an official Walloon 2021 flood extent to replace or complement EMS in the Vesdre valley?
-- Disability: no open municipal data; ask AVIQ / IWEPS, or keep 65+/80+ as the proxy and say so.
+- Named public actor for the brief. The review suggests the Governor of the Province of Liège.
+- Is there an official Walloon 2021 flood extent (SPW) to show next to EMS in the Vesdre?
+- Disability data: ask AVIQ / IWEPS, or keep 65+/80+ as the proxy and say so.
+- Should scenarios cover full municipalities instead of only the EMS-mapped part (21 of 66 are less than half mapped)?
+  That needs a 7-minute rerun and changes all numbers.

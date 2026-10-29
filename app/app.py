@@ -134,7 +134,7 @@ if roads is not None:
     km = rs.groupby("mode")[f"flooded_km_{key}"].sum()
     c = st.columns(4)
     c[0].metric("Main roads flooded", f"{km.get('Road', 0):.1f} km", "highways, primary, secondary", delta_color="off")
-    c[1].metric("Railways flooded", f"{km.get('Railway', 0):.1f} km", "incl. tram / light rail", delta_color="off")
+    c[1].metric("Railway lines flooded", f"{km.get('Railway', 0):.1f} km", "Infrabel lines in service", delta_color="off")
 
 # ---------------- tabs ----------------
 tab_map, tab_shel, tab_pop, tab_road, tab_cmp, tab_bld, tab_lim = st.tabs(
@@ -265,7 +265,7 @@ with tab_road:
             st.markdown(f"**Named roads and lines affected** ({len(named)})")
             st.dataframe(named, hide_index=True, width="stretch")
         st.caption("Roads: Copernicus EMS (highways, primary and secondary roads only, no local streets). "
-                   "Railways: © OpenStreetMap contributors (sidings and yards excluded). A flooded section can cut off "
+                   "Railways: Infrabel main tracks (CC0), one track per line, in service only. A flooded section can cut off "
                    "access to whole neighbourhoods; network connectivity is not analysed yet.")
 
 with tab_cmp:
@@ -315,6 +315,7 @@ with tab_lim:
                 f"**Municipality boundaries:** {meta['municipality_boundaries']}")
     st.markdown("**Assumptions**\n" + "\n".join(f"- {a}" for a in meta["assumptions"]))
     st.markdown("**External sources:** shelter candidates © OpenStreetMap contributors (ODbL); "
+                "railway lines Infrabel open data (CC0); "
                 "Eurostat Census 2021 1 km grid (© European Union); Statbel population by age 2021 (CC BY 4.0).")
     st.markdown("**Not yet included:** vulnerable homes and evacuation priority (next pipeline steps). "
                 "No open disability data per municipality was found.")
