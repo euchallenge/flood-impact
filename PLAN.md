@@ -52,7 +52,7 @@ Scope: Walloon municipalities covered by EMS EMSR518 (66). Germany and the Nethe
 | 5 | Roads (EMS) and railway lines (Infrabel): km flooded per scenario | ✅ | `roads.gpkg`, `roads_stats.parquet` |
 | 6 | Population and age, total and exposed (two-source range) | ✅ | `buildings.parquet`, `municipalities.gpkg` |
 | 7 | **Data-quality flags:** municipalities with no EFAS-modelled river (28 of 66; replaces the review's "east of 5.94°", which was wrong), depths > 10 m (1,200), 2.5 m height floor (22.3%), depth inversions (84), depth unit metres (JRC README) | ✅ | flags in `buildings.parquet`, `municipalities.gpkg`, `facilities.gpkg` |
-| 8 | **Shelter attributes:** PRM access (OSM `wheelchair`), rough capacity (floor area × storeys ÷ 3.5 m² per person, the Sphere minimum, labelled as an assumption) | ⏳ P1 | `facilities.gpkg` |
+| 8 | **Shelter attributes:** PRM access (OSM `wheelchair`, tagged for only 49 of 2,346; upper-floor shelters marked "stairs likely"), rough capacity per scenario (largest building × ≤ 2 dry storeys × 50% ÷ 3.5 m² Sphere minimum; hospitals 0) | ✅ | `facilities.gpkg` |
 | 9 | **Dry access:** OSM road graph for walking and driving; per scenario, remove flooded edges and compute from each 250 m residential cell the nearest reachable dry shelter (distance, walking time) | ⏳ P1 | `access_<scenario>.parquet` |
 | 10 | **Vulnerability:** vulnerable sites (care homes, schools) in the extent; homes with no dry floor per cell (height ≤ depth + 1 m, aggregated, never per house) | ⏳ P1 | `cells.parquet` |
 | 11 | **Shelter gap and evacuation priority** per 250 m cell and municipality: exposed people (by age), no dry route, no dry floor | ⏳ P2 | `cells.parquet`, `municipalities.gpkg` |
@@ -92,7 +92,8 @@ Scope: Walloon municipalities covered by EMS EMSR518 (66). Germany and the Nethe
 - Exposed = OBAT centroid inside the observed extent, or in an EFAS cell with depth > 0 (about 90 m cells).
 - Storey height 3 m. Shelter dry = footprint outside the extent; upper floors usable = height − depth ≥ 3 m.
 - Population split over residential buildings by volume within each 1 km cell; range from two sources.
-- Capacity (planned): 3.5 m² per person, floor area × storeys. This is a rough planning proxy, not official capacity.
+- Capacity: largest building footprint × up to 2 dry storeys × 50% usable ÷ 3.5 m² per person (Sphere minimum).
+  A theoretical maximum for comparison between municipalities, not an official capacity. Hospitals get none.
 - EFAS depth in metres (JRC README v3.1.1, per the review; check).
 
 ## Open questions for the team

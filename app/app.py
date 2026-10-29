@@ -162,7 +162,9 @@ if has_pop:
     c[2].metric("Of whom under 15", f"{exp['pop_lt15_census'].sum():,.0f}", "Census 2021 grid", delta_color="off")
 if fac is not None:
     usable = fac[status_col].isin(["Dry: usable", "Wet: upper floors usable", "Dry in 2021"]).sum()
-    c[3].metric("Shelter candidates usable", f"{usable} of {len(fac)}", "schools, hospitals, churches, sports",
+    cap = fac[f"capacity_{key}"].sum() if f"capacity_{key}" in fac else None
+    c[3].metric("Shelter candidates usable", f"{usable} of {len(fac)}",
+                f"rough capacity {cap:,} people" if cap is not None else "schools, hospitals, churches, sports",
                 delta_color="off")
 
 rs = wet_lines = None
@@ -256,14 +258,20 @@ with tab_shel:
             "Facility": fac["category"].map(CATEGORY_ICONS) + " " + fac["name"].replace("", "(no name)"),
             "Type": fac["category"], "Height (m)": fac["height_m"],
             **({} if observed else {"Water depth (m)": fac[f"depth_{key}"].round(1)}),
-            "Status": fac[status_col], "Flooded in 2021": fac["flooded_2021"].map({True: "yes", False: "no"}),
+            "Status": fac[status_col],
+            **({"Rough capacity": fac[f"capacity_{key}"], "PRM access": fac[f"prm_{key}"]}
+               if f"capacity_{key}" in fac else {}),
+            "Flooded in 2021": fac["flooded_2021"].map({True: "yes", False: "no"}),
         }).sort_values(["Status", "Type"])
         st.dataframe(table, hide_index=True, width="stretch")
         st.download_button("Download as CSV", table.to_csv(index=False).encode("utf-8"),
                            f"shelters_{name}_{key}.csv", "text/csv")
         st.caption("Dry: the footprint is outside the flood extent. Upper floors usable: building height minus water depth "
                    "is at least one 3 m storey. Heights are OBAT estimates averaged over 100 m (minimum 2.5 m), not "
-                   "surveyed values, and say nothing about capacity, access roads or whether the building is open. "
+                   "surveyed values. Rough capacity = largest building's footprint × up to 2 dry storeys × 50% usable ÷ "
+                   "3.5 m² per person (Sphere minimum): a theoretical maximum, not an official capacity. Hospitals get "
+                   "no capacity (critical sites to protect). PRM access comes from the OpenStreetMap 'wheelchair' tag "
+                   "(mapped for few buildings); upper-floor shelters likely need stairs. Access roads not yet checked. "
                    "Facility locations: © OpenStreetMap contributors.")
 
 with tab_pop:
