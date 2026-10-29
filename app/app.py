@@ -157,8 +157,8 @@ elif muni["rp500_km2"] == 0:
 
 def issue_html(row):
     icon, word, color = RISK_LEVELS[row.level]
-    return (f"<div style='border-left:6px solid {color};padding:6px 10px;margin:4px 0;"
-            f"background:rgba(127,127,127,.08);border-radius:4px'>{icon} <b>{word} · {html.escape(row.issue)}</b><br>"
+    return (f"<div style='border-left:5px solid {color};padding:3px 8px;margin:3px 0;font-size:.92rem;"
+            f"background:rgba(127,127,127,.08);border-radius:4px'><b>{html.escape(row.issue)}</b>: "
             f"{html.escape(row.text)}<br><span style='opacity:.8'>→ {html.escape(row.action)}</span></div>")
 
 
@@ -168,10 +168,13 @@ if risks is not None:                              # priority issues first: what
     st.subheader(f"Priority issues · {n.get(1, 0)} 🔴 · {n.get(2, 0)} 🟠 · {n.get(3, 0)} 🟡")
     if r.empty:
         st.success("No issue found with the available data for this scenario (this is not a guarantee).")
-    st.markdown("".join(issue_html(x) for x in r[r["level"] < 3].itertuples()), unsafe_allow_html=True)
-    if (r["level"] == 3).any():
-        with st.expander(f"{(r['level'] == 3).sum()} lower-priority items 🟡"):
-            st.markdown("".join(issue_html(x) for x in r[r["level"] == 3].itertuples()), unsafe_allow_html=True)
+    for lvl, (icon, word, _) in RISK_LEVELS.items():   # one collapsed group per severity; names in the header
+        g = r[r["level"] == lvl]
+        if g.empty:
+            continue
+        names = ", ".join(g["issue"])
+        with st.expander(f"{icon} **{word}** ({len(g)}): {names if len(names) < 110 else names[:107] + '…'}"):
+            st.markdown("".join(issue_html(x) for x in g.itertuples()), unsafe_allow_html=True)
     st.caption("Levels come from screening thresholds (see the 'All municipalities' tab), not official standards.")
 
 flooded_km2 = muni[f"{key}_km2"]
