@@ -29,6 +29,7 @@ ACCESS_COLORS = {"≤ 30 min walk": "#1a9850", "> 30 min walk": "#fdae61", "No d
 USE_COLORS = {"Residential": "#e41a1c", "Non-residential": "#377eb8", "Outside built-up area": "#999999"}
 SUSPECT_DEPTH_M = 10                               # deeper cells are likely river channel or artefacts (step 7)
 HEIGHT_FLOOR_M = 2.5                               # OBAT minimum height: not a measured value
+RESIDENT_URL = os.getenv("RESIDENT_URL", "http://localhost:8000").rstrip("/")   # Vercel URL once deployed
 CARTO_KEY = os.getenv("CARTO_API_KEY", "")         # CARTO basemaps need ?key= (otherwise "API key required" tiles)
 CARTO_ATTR = "© OpenStreetMap contributors © CARTO"
 BASEMAPS = {                                       # name: (tile URL, attribution); first one is shown by default
@@ -98,7 +99,15 @@ has_pop = "pop_census" in buildings.columns
 
 # ---------------- sidebar ----------------
 st.sidebar.title("🌊 Flood impact card")
-label = st.sidebar.radio("Flood scenario", list(SCENARIOS))
+if "query_applied" not in st.session_state:        # links from the resident view: ?m=<LAU_ID>&s=<scenario>
+    st.session_state["query_applied"] = True
+    q = st.query_params
+    by_key = {v: k for k, v in SCENARIOS.items()}
+    if q.get("s") in by_key:
+        st.session_state["scenario_label"] = by_key[q.get("s")]
+    if q.get("m") in set(munis["LAU_ID"]):
+        st.session_state["lau_id"] = q.get("m")
+label = st.sidebar.radio("Flood scenario", list(SCENARIOS), key="scenario_label")
 key = SCENARIOS[label]
 observed = key == "observed_2021"
 st.sidebar.caption("RP = return period: a flood expected on average once every N years (EFAS model). "
@@ -117,6 +126,9 @@ lau_id = st.sidebar.selectbox("Municipality (sorted by exposure in this scenario
                               index=options.index(st.session_state["lau_id"]), format_func=labels.get)
 st.session_state["lau_id"] = lau_id
 st.sidebar.caption("⚠ = EMS mapped less than half of the municipality.")
+st.query_params.update(m=lau_id, s=key)           # shareable URL, same parameters as the resident view
+st.sidebar.link_button("👥 Switch to the resident view", f"{RESIDENT_URL}/?m={lau_id}&s={key}",
+                       help="Opens what residents see for this municipality and scenario", width="stretch")
 
 muni = munis[munis["LAU_ID"] == lau_id].iloc[0]
 name = muni["name"]

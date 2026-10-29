@@ -1,21 +1,55 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Flood shelter finder</title>
-  <style>
-    body { margin: 0; font: 17px/1.5 system-ui, sans-serif; color: #1a1a1a; background: #f7f9fb; }
-    main { max-width: 36rem; margin: 0 auto; padding: 2rem 1rem; }
-    .note { padding: .75rem 1rem; border-left: 4px solid #d73027; background: #fff; }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Abri inondation</title>
+  <meta name="description" content="Candidate flood shelters reachable by a dry route, July 2021 floods area, Wallonia">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <header>
+    <h1 data-t="title"></h1>
+    <div class="langs" role="group" aria-label="Language">
+      <a id="adminLink" class="switch" data-t="adminView" hidden></a>
+      <button data-lang="fr">FR</button><button data-lang="de">DE</button><button data-lang="en">EN</button>
+    </div>
+  </header>
+  <div class="banner" role="alert"><strong data-t="notOfficial"></strong> <span data-t="call112"></span></div>
+
   <main>
-    <h1>Flood shelter finder</h1>
-    <p>Wallonia, July 2021 floods. This page will show candidate shelters outside the modelled flood extent,
-       reachable by a dry road. In preparation.</p>
-    <p class="note">Candidate shelters are not official reception centres. In an emergency, call 112.</p>
+    <section class="controls">
+      <label for="muni" data-t="muniLabel"></label>
+      <div class="row">
+        <select id="muni"></select>
+        <button id="locate" class="secondary" data-t="locate"></button>
+      </div>
+      <p class="hint" data-t="tapHint"></p>
+
+      <fieldset>
+        <legend data-t="scenarioLabel"></legend>
+        <div class="scenarios" role="group">
+          <button data-scen="rp10" data-t="rp10"></button>
+          <button data-scen="rp100" data-t="rp100"></button>
+          <button data-scen="rp500" data-t="rp500"></button>
+          <button data-scen="observed_2021" data-t="observed"></button>
+        </div>
+      </fieldset>
+      <label class="check"><input type="checkbox" id="prm"> <span data-t="prmLabel"></span></label>
+    </section>
+
+    <div id="map" aria-label="Map"></div>
+    <section id="result" aria-live="polite"></section>
   </main>
+
+  <footer>
+    <p data-t="footerCandidates"></p>
+    <p data-t="footerPrivacy"></p>
+    <p id="sources"></p>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

@@ -47,7 +47,15 @@ Without it the map falls back to satellite imagery only.
   uses OpenStreetMap and Esri tiles.
 - **Resident view (Vercel):** `vercel.json` sets the framework to "Other" and serves `resident/` as static files.
   Streamlit can't run on Vercel (no `app` ASGI/WSGI object, no WebSockets in Vercel Functions), so don't remove it:
-  without it Vercel's Python preset fails on `app/app.py`.
+  without it Vercel's Python preset fails on `app/app.py`. Refresh its data with `python pipeline/export_resident.py`
+  after any pipeline run.
+- **Switch between the two views:** each view links to the other with `?m=<LAU_ID>&s=<scenario>`.
+  - Admin → resident: set `RESIDENT_URL` (the Vercel URL) in the Streamlit app's secrets or `.env`.
+    Default `http://localhost:8000`.
+  - Resident → admin: set `adminUrl` in `resident/config.json` (the Streamlit Cloud URL). Default
+    `http://localhost:8501`; leave it empty to hide the link.
+  - The admin view shows building-level data. Before sharing the resident URL publicly, either make the Streamlit
+    app private (viewer access in Streamlit Cloud) or empty `adminUrl`.
 
 ## Data and limits
 - Challenge data: Copernicus EMS EMSR518 (MONIT01 products), EFAS flood hazard, GHS-OBAT buildings.
