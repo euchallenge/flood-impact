@@ -28,11 +28,20 @@ CARTO_ATTR = "© OpenStreetMap contributors © CARTO"
 BASEMAPS = {                                       # name: (tile URL, attribution); first one is shown by default
     "Light (CARTO)": (f"https://basemaps.cartocdn.com/rastertiles/light_all/{{z}}/{{x}}/{{y}}.png?key={CARTO_KEY}", CARTO_ATTR),
     "Streets (CARTO)": (f"https://basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}.png?key={CARTO_KEY}", CARTO_ATTR),
+    "Streets (OpenStreetMap)": ("https://tile.openstreetmap.org/{z}/{x}/{y}.png", "© OpenStreetMap contributors"),
     "Satellite (Esri)": ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
                          "Tiles © Esri, Maxar, Earthstar Geographics"),
 }
 if not CARTO_KEY:                                  # keyless fallback: satellite only
     BASEMAPS = {k: v for k, v in BASEMAPS.items() if "CARTO" not in k}
+USE_LABELS = {0: "Outside built-up area", 1: "Residential", 2: "Non-residential"}          # OBAT documentation
+EPOCH_LABELS = {0: "Outside built-up area", 1: "Before 1980", 2: "1980–1990", 3: "1990–2000", 4: "2000–2010",
+                5: "2010–2020"}
+SHELTER_COLORS = {"Dry: usable": "#1a9850", "Wet: upper floors usable": "#fdae61", "Wet: not usable": "#d73027",
+                  "Wet: height unknown": "#969696", "Dry in 2021": "#1a9850", "Flooded in 2021": "#d73027"}
+TRANSPORT_STYLE = {"Road": {"color": "#7b3294", "weight": 4}, "Railway": {"color": "#000000", "weight": 4,
+                                                                         "dashArray": "8 4"}}
+CATEGORY_ICONS = {"School": "🏫", "Hospital": "🏥", "Church": "⛪", "Stadium / sports hall": "🏟️"}
 EXPOSED_COL = {"rp10": "buildings_rp10", "rp100": "buildings_rp100", "rp500": "buildings_rp500",
                "observed_2021": "buildings_flooded_2021"}
 
@@ -45,13 +54,19 @@ def load():
     extents = {k: gpd.read_file(DATA / "flood_extents.gpkg", layer=k) for k in SCENARIOS.values()}
     buildings = gpd.read_parquet(DATA / "buildings.parquet")
     meta = json.loads((DATA / "metadata.json").read_text(encoding="utf-8"))
-    return munis, extents, buildings, meta
+    facilities = gpd.read_file(DATA / "facilities.gpkg") if (DATA / "facilities.gpkg").exists() else None
+    roads = None
+    if (DATA / "roads_stats.parquet").exists():
+        roads = {"stats": pd.read_parquet(DATA / "roads_stats.parquet"),
+                 **{k: gpd.read_file(DATA / "roads.gpkg", layer=f"flooded_{k}") for k in SCENARIOS.values()}}
+    return munis, extents, buildings, meta, facilities, roads
 
 
 if not (DATA / "metadata.json").exists():
     st.error("No data yet: run `python pipeline/build_wallonia.py` first.")
     st.stop()
-munis, extents, buildings, meta = load()
+munis, extents, buildings, meta, facilities, roads = load()
+has_pop = "pop_census" in buildings.columns
 
 # ---------------- sidebar ----------------
 st.sidebar.title("🌊 Flood impact card")
@@ -99,8 +114,31 @@ else:
     c[2].metric("Exposed with water > 1.5 m", f"{deep:,}", "ground floor submerged", delta_color="off")
 c[3].metric("Exposed with unknown height", f"{exp['height'].isna().mean():.0%}" if len(exp) else "–")
 
+fac = facilities[facilities["LAU_ID"] == muni["LAU_ID"]] if facilities is not None else None
+status_col = f"shelter_{key}"
+c = st.columns(4)
+if has_pop:
+    lo, hi = sorted([exp["pop_census"].sum(), exp["pop_ghs"].sum()])
+    c[0].metric("People exposed", f"{lo:,.0f} – {hi:,.0f}", "Census 2021 grid / GHS-POP", delta_color="off")
+    c[1].metric("Of whom aged 65+", f"{exp['pop_65plus_census'].sum():,.0f}", "Census 2021 grid", delta_color="off")
+    c[2].metric("Of whom under 15", f"{exp['pop_lt15_census'].sum():,.0f}", "Census 2021 grid", delta_color="off")
+if fac is not None:
+    usable = fac[status_col].isin(["Dry: usable", "Wet: upper floors usable", "Dry in 2021"]).sum()
+    c[3].metric("Shelter candidates usable", f"{usable} of {len(fac)}", "schools, hospitals, churches, sports",
+                delta_color="off")
+
+rs = wet_lines = None
+if roads is not None:
+    rs = roads["stats"][roads["stats"]["LAU_ID"] == muni["LAU_ID"]]
+    wet_lines = roads[key][roads[key]["LAU_ID"] == muni["LAU_ID"]]
+    km = rs.groupby("mode")[f"flooded_km_{key}"].sum()
+    c = st.columns(4)
+    c[0].metric("Main roads flooded", f"{km.get('Road', 0):.1f} km", "highways, primary, secondary", delta_color="off")
+    c[1].metric("Railways flooded", f"{km.get('Railway', 0):.1f} km", "incl. tram / light rail", delta_color="off")
+
 # ---------------- tabs ----------------
-tab_map, tab_cmp, tab_bld, tab_lim = st.tabs(["Map", "Compare with 2021", "Buildings", "Data & limits"])
+tab_map, tab_shel, tab_pop, tab_road, tab_cmp, tab_bld, tab_lim = st.tabs(
+    ["Map", "Shelters", "Population", "Roads & rail", "Compare with 2021", "Buildings", "Data & limits"])
 
 with tab_map:
     bounds = muni.geometry.bounds
@@ -134,6 +172,21 @@ with tab_map:
         folium.CircleMarker([row.geometry.y, row.geometry.x], radius=2, color=color, fill=True,
                             fill_opacity=0.9, weight=0, tooltip=tip).add_to(layer)
     layer.add_to(m)
+    if wet_lines is not None and not wet_lines.empty:
+        folium.GeoJson(wet_lines[["mode", "class", "name", "length_km", "geometry"]], name="Flooded roads & railways",
+                       style_function=lambda f: TRANSPORT_STYLE[f["properties"]["mode"]],
+                       tooltip=folium.GeoJsonTooltip(["class", "name"], aliases=["", ""])).add_to(m)
+    if fac is not None and not fac.empty:
+        shel = folium.FeatureGroup(name="Shelter candidates")
+        for row in fac.itertuples():
+            status = getattr(row, status_col)
+            folium.GeoJson(row.geometry, style_function=lambda f, c=SHELTER_COLORS[status]: {
+                "color": c, "weight": 2, "fillColor": c, "fillOpacity": 0.7},
+                tooltip=f"{CATEGORY_ICONS[row.category]} {row.name or row.category} · {status}").add_to(shel)
+            folium.Marker([row.geometry.centroid.y, row.geometry.centroid.x], tooltip=f"{row.name or row.category} · {status}",
+                          icon=folium.DivIcon(html=f"<div style='font-size:18px'>{CATEGORY_ICONS[row.category]}</div>")
+                          ).add_to(shel)
+        shel.add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
     st_folium(m, height=560, use_container_width=True, returned_objects=[])
 
@@ -141,6 +194,79 @@ with tab_map:
               " · ".join(f"<span style='color:{DEPTH_COLORS[k]}'>■</span> {v}" for k, v in DEPTH_LABELS.items()))
     st.caption(legend + (f" · map shows {MAX_POINTS:,} of {len(exp):,} exposed buildings" if len(exp) > MAX_POINTS else ""),
                unsafe_allow_html=True)
+
+with tab_shel:
+    if fac is None or fac.empty:
+        st.write("No shelter candidates (schools, hospitals, churches, stadiums / sports halls) found here in OpenStreetMap.")
+    else:
+        st.subheader(f"Shelter candidates in {name}: {label}")
+        st.markdown(" · ".join(f"<span style='color:{c}'>■</span> {s}" for s, c in SHELTER_COLORS.items()
+                               if s in set(fac[status_col])), unsafe_allow_html=True)
+        st.bar_chart(pd.crosstab(fac["category"], fac[status_col]),
+                     color=[SHELTER_COLORS[s] for s in sorted(set(fac[status_col]))], horizontal=True)
+        table = pd.DataFrame({
+            "Facility": fac["category"].map(CATEGORY_ICONS) + " " + fac["name"].replace("", "(no name)"),
+            "Type": fac["category"], "Height (m)": fac["height_m"],
+            **({} if observed else {"Water depth (m)": fac[f"depth_{key}"].round(1)}),
+            "Status": fac[status_col], "Flooded in 2021": fac["flooded_2021"].map({True: "yes", False: "no"}),
+        }).sort_values(["Status", "Type"])
+        st.dataframe(table, hide_index=True, width="stretch")
+        st.download_button("Download as CSV", table.to_csv(index=False).encode("utf-8"),
+                           f"shelters_{name}_{key}.csv", "text/csv")
+        st.caption("Dry: the footprint is outside the flood extent. Upper floors usable: building height minus water depth "
+                   "is at least one 3 m storey. Heights are OBAT estimates averaged over 100 m (minimum 2.5 m), not "
+                   "surveyed values, and say nothing about capacity, access roads or whether the building is open. "
+                   "Facility locations: © OpenStreetMap contributors.")
+
+with tab_pop:
+    if not has_pop:
+        st.write("Population not computed yet: run `python pipeline/build_population.py`.")
+    else:
+        st.subheader(f"Who lives in {name}?")
+        total = muni["statbel_total"]
+        ages = {"0–14": muni["statbel_0_14"], "15–64": muni["statbel_15_64"], "65–79": muni["statbel_65_79"],
+                "80+": muni["statbel_80plus"]}
+        c = st.columns(5)
+        c[0].metric("Inhabitants (whole municipality)", f"{total:,.0f}", "Statbel, 1 Jan 2021", delta_color="off")
+        for i, (band, n) in enumerate(ages.items(), start=1):
+            c[i].metric(f"Aged {band}", f"{n:,.0f}", f"{n / total:.1%}" if total else "", delta_color="off")
+        st.caption(f"In the part mapped by EMS: {muni['pop_census_area']:,.0f} (Census 2021 grid) – "
+                   f"{muni['pop_ghs_area']:,.0f} (GHS-POP 2020) inhabitants.")
+
+        st.markdown(f"**People living in exposed buildings – {label}**")
+        rows = []
+        for lab, k in SCENARIOS.items():
+            pre = f"exp_{k}_"
+            rows.append({"Scenario": lab, "People (Census grid)": muni[pre + "pop_census"],
+                         "People (GHS-POP)": muni[pre + "pop_ghs"], "Under 15": muni[pre + "pop_lt15_census"],
+                         "15–64": muni[pre + "pop_15_64_census"], "65+": muni[pre + "pop_65plus_census"],
+                         "80+ (estimate)": muni[pre + "pop_census"] * muni["share_80plus"]})
+        st.dataframe(pd.DataFrame(rows).set_index("Scenario").round(0).astype(int), width="stretch")
+        st.caption("Each 1 km cell's population is split over its residential buildings by volume (footprint × height). "
+                   "Age groups come from the Eurostat Census 2021 grid. 80+ is estimated with the municipality's Statbel "
+                   "80+ share, assuming older residents are spread evenly. No open disability data exists at municipal "
+                   "level, so the 65+ and 80+ counts are the best available proxy for people needing assistance.")
+
+with tab_road:
+    if rs is None:
+        st.write("Roads not computed yet: run `python pipeline/build_roads.py`.")
+    elif rs.empty:
+        st.write("No main roads or railways mapped in this municipality.")
+    else:
+        st.subheader(f"Roads and railways under water – {label}")
+        st.markdown("<span style='color:#7b3294'>━</span> road · <span style='color:#000'>╍</span> railway (on the map)",
+                    unsafe_allow_html=True)
+        cols = {f"flooded_km_{k}": lab for lab, k in SCENARIOS.items()}
+        t = rs.set_index(["mode", "class"])[["network_km", *cols]].rename(columns={"network_km": "Network (km)", **cols})
+        st.dataframe(t.round(1), width="stretch")
+        if not wet_lines.empty:
+            named = (wet_lines[wet_lines["name"] != ""].groupby(["mode", "class", "name"])["length_km"].sum()
+                     .sort_values(ascending=False).round(2).rename("Flooded (km)").reset_index())
+            st.markdown(f"**Named roads and lines affected** ({len(named)})")
+            st.dataframe(named, hide_index=True, width="stretch")
+        st.caption("Roads: Copernicus EMS (highways, primary and secondary roads only, no local streets). "
+                   "Railways: © OpenStreetMap contributors (sidings and yards excluded). A flooded section can cut off "
+                   "access to whole neighbourhoods; network connectivity is not analysed yet.")
 
 with tab_cmp:
     st.subheader("How well does each modelled scenario match what happened in 2021?")
@@ -176,13 +302,19 @@ with tab_bld:
         h = pd.cut(exp["height"], [0, 3, 6, 9, 15, np.inf], labels=["≤ 3 m", "3–6 m", "6–9 m", "9–15 m", "> 15 m"])
         right.bar_chart(h.value_counts().sort_index())
         left2, right2 = st.columns(2)
-        left2.markdown("**By `use` code** (meaning: OBAT documentation)")
-        left2.dataframe(exp["use"].value_counts().rename("buildings"), width="stretch")
-        right2.markdown("**By `epoch` code** (meaning: OBAT documentation)")
-        right2.dataframe(exp["epoch"].value_counts().rename("buildings"), width="stretch")
+        left2.markdown("**Exposed buildings by use** (OBAT)")
+        left2.bar_chart(exp["use"].map(USE_LABELS).value_counts(), horizontal=True)
+        right2.markdown("**Exposed buildings by construction period** (OBAT)")
+        right2.bar_chart(exp["epoch"].map(EPOCH_LABELS).value_counts().reindex(EPOCH_LABELS.values()).dropna())
+        if "ems_category" in exp.columns:
+            st.markdown("**Exposed buildings by type** (Copernicus EMS building blocks, where mapped)")
+            st.bar_chart(exp["ems_category"].value_counts(), horizontal=True)
 
 with tab_lim:
     st.markdown(f"**Region:** {meta['region']}  \n**Observed 2021:** {meta['observed_2021_sources']}  \n"
                 f"**Municipality boundaries:** {meta['municipality_boundaries']}")
     st.markdown("**Assumptions**\n" + "\n".join(f"- {a}" for a in meta["assumptions"]))
-    st.markdown("**Not yet included:** schools, hospitals, roads, population and evacuation priority (next pipeline steps).")
+    st.markdown("**External sources:** shelter candidates © OpenStreetMap contributors (ODbL); "
+                "Eurostat Census 2021 1 km grid (© European Union); Statbel population by age 2021 (CC BY 4.0).")
+    st.markdown("**Not yet included:** vulnerable homes and evacuation priority (next pipeline steps). "
+                "No open disability data per municipality was found.")

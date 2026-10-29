@@ -40,7 +40,7 @@ marked **(to verify)**. Challenge data, external sources and assumptions are kep
 - **EFAS covers nothing east of lon 5.94.** All RPs show 0 for Eupen, Kelmis, Lontzen, Plombières, Raeren and Welkenraedt
   (22,666 buildings). Show "no model coverage", not "0 exposed".
 - **Depth monotonicity breaks** in 80 buildings (RP100 < RP10), all on permanent-water cells. Mention it in the limits.
-- **EFAS = undefended hazard.** Dottori et al. 2022 (ESSD) says the maps ignore local defences such as dykes. This explains Liège's high RP numbers.
+- **EFAS undefended hazard.** Dottori et al. 2022 (ESSD) says the maps ignore local defences such as dykes. This explains Liège's high RP numbers.
   Say so on screen.
 - **Add population (GHS-POP)**, the number policy makers care about most. Use `patterns.area_weighted_population` from
   export-upload. Check the GHS-POP CRS (possibly Mollweide) first. 1–2 h.
